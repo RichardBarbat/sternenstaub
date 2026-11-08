@@ -2,7 +2,7 @@
 /* Sternenstaub – Spiellogik & Oberfläche */
 
 const SAVE_KEY = 'sternenstaub-v1';
-const VERSION = '1.3';
+const VERSION = '1.4';
 const $ = s => document.querySelector(s);
 const el = {
   dust: $('#dust'), rate: $('#rate'), tapv: $('#tapv'), buffs: $('#buffs'), stage: $('#stage'), hint: $('#hint'),
@@ -76,7 +76,13 @@ function costOf(i, n) {
   return Math.ceil(c * (1 - 1e-12));
 }
 function maxAfford(i) { return Math.max(0, Math.floor(Math.log(S.dust * 0.15 / unitCost(i) + 1) / Math.log(1.15))); }
-function buyCount(i) { return S.buyAmt === 'max' ? Math.max(1, maxAfford(i)) : S.buyAmt; }
+// Kaufmenge: feste Anzahl, so viele wie bezahlbar, oder „Rund“ = bis zur nächsten Zehnerzahl (23 → 30, 30 → 40)
+function buyCount(i) {
+  const a = S.buyAmt;
+  if (a === 'max') return Math.max(1, maxAfford(i));
+  if (a === 'r10') return 10 - S.gens[i] % 10;
+  return a > 0 ? a : 1;
+}
 
 // Sternfarbe je nach Fortschritt: Gold → Orange → Rosa → Magenta → Violett → Blau → Cyan und zurück (ohne Grün)
 const ORB_HUES = [48, 22, -20, -60, -95, -135, -165];
@@ -196,7 +202,7 @@ function offline(sec) {
   earn(gain);
   if (sec < 60) return;
   modal(`<div class="em">🌙</div><h3>Willkommen zurück!</h3>
-    <p>Du warst <b>${fmtTime(sec)}</b> weg. Deine Erzeuger haben weitergesammelt:</p>
+    <p>Du warst <b>${fmtTime(sec)}</b> weg. Dein Kosmos hat weitergesammelt:</p>
     <div class="big">+${fmt(gain)} ✦</div>
     <p class="note">${Math.round(D.offEff * 100)} % Effizienz · max. ${D.offCap} Std.${sec > D.offCap * 3600 ? ' (Limit erreicht)' : ''}</p>
     <button class="btn" data-m="close">Einsammeln ✨</button>`);
@@ -207,7 +213,7 @@ function confirmNova() {
   const g = coreGain();
   if (g < 1) return;
   modal(`<div class="em">💥</div><h3>Supernova auslösen?</h3>
-    <p>Dein Stern explodiert und wird neu geboren. Sternenstaub, Erzeuger und Upgrades gehen verloren – dafür bekommst du</p>
+    <p>Dein Stern explodiert und wird neu geboren. Sternenstaub, dein Kosmos und deine Upgrades gehen verloren – dafür bekommst du</p>
     <div class="big">+${fmt(g)} 💠</div>
     <p>Danach: <b>+${fmt((S.cores + g) * 2)} %</b> Produktion für immer.</p>
     <button class="btn" data-m="go">Ja, explodieren!</button>
@@ -320,7 +326,7 @@ function renderBuffs() {
 
 /* ---------- Listen ---------- */
 let tab = 'gens', listKey = '';
-const TITLES = { gens: 'Erzeuger', ups: 'Upgrades', ach: 'Erfolge', nova: 'Supernova', more: 'Mehr' };
+const TITLES = { gens: 'Kosmos', ups: 'Upgrades', ach: 'Erfolge', nova: 'Supernova', more: 'Mehr' };
 const BUILD = {}, UPDATE = {}, KEY = {};
 
 function revealed() { let n = 1; GENS.forEach((g, i) => { if (S.gens[i] > 0 || S.runEarned >= g.cost * 0.3) n = i + 1; }); return n; }
@@ -329,7 +335,7 @@ function visibleUps() {
     .sort((a, b) => a.cost - b.cost);
 }
 
-// Erzeuger
+// Kosmos (Himmelskörper, die Sternenstaub sammeln)
 KEY.gens = () => revealed() + '|' + NUM.sci;
 BUILD.gens = () => {
   const n = revealed();
@@ -337,7 +343,7 @@ BUILD.gens = () => {
   for (let i = 0; i < Math.min(n + 1, GENS.length); i++) {
     const g = GENS[i];
     if (i < n) {
-      // --h: dieselbe Farbe wie der Ring dieses Erzeugers um den Stern
+      // --h: dieselbe Farbe wie der Ring dieses Himmelskörpers um den Stern
       h += `<div class="row act" data-act="gen" data-i="${i}" style="--h:${g.hue}"><div class="ico"><span>${g.ico}</span></div>
         <div class="info"><div class="nm">${g.name}</div><div class="ds"></div><div class="cost"></div></div>
         <div class="cnt"></div><div class="prog"></div></div>`;
@@ -352,7 +358,8 @@ UPDATE.gens = () => {
   for (const r of el.list.querySelectorAll('.row[data-i]')) {
     const i = +r.dataset.i, n = buyCount(i), c = costOf(i, n), ok = canPay(c), own = S.gens[i];
     r.classList.toggle('ok', ok); r.classList.toggle('no', !ok);
-    put(r.querySelector('.cost'), `✦ ${fmt(c)}${n > 1 ? `<span class="x">für ${n}</span>` : ''}`);
+    const x = S.buyAmt === 'r10' ? `für ${n} → ${fmt(own + n)}` : n > 1 ? `für ${n}` : '';
+    put(r.querySelector('.cost'), `✦ ${fmt(c)}${x ? `<span class="x">${x}</span>` : ''}`);
     put(r.querySelector('.ds'), own ? `+${fmtR(genRate(i))}/s je · ${fmtR(genRate(i) * own)}/s gesamt` : GENS[i].desc);
     put(r.querySelector('.cnt'), own ? fmt(own) : '');
     const w = Math.min(100, S.dust / c * 100).toFixed(1) + '%';
@@ -361,14 +368,14 @@ UPDATE.gens = () => {
   }
 };
 
-// Upgrades – Erzeuger-Upgrades in der Ringfarbe, sonst nach Art (Tippen, Sternbild, Sternschnuppe, Offline)
+// Upgrades – Upgrades für Himmelskörper in deren Ringfarbe, sonst nach Art (Tippen, Sternbild, Sternschnuppe, Offline)
 const UP_HUES = { ta: 195, sb: 275, st: 42, of: 228 };
 const upHue = u => u.kind === 'gen' ? GENS[u.gen].hue : (UP_HUES[u.id.slice(0, 2)] ?? 260);
 KEY.ups = () => visibleUps().map(u => u.id).join() + '|' + NUM.sci;
 BUILD.ups = () => {
   const list = visibleUps(), bought = Object.keys(S.ups).length;
   let h = `<p class="note" style="padding:2px 4px">${bought} von ${UPGRADES.length} gekauft</p>`;
-  if (!list.length) return h + `<div class="empty">✨ Gerade keine Upgrades verfügbar.<br>Sammle weiter Sternenstaub und kaufe Erzeuger!</div>`;
+  if (!list.length) return h + `<div class="empty">✨ Gerade keine Upgrades verfügbar.<br>Sammle weiter Sternenstaub und erweitere deinen Kosmos!</div>`;
   for (const u of list) {
     h += `<div class="row act" data-act="up" data-id="${u.id}" data-c="${u.cost}" style="--h:${upHue(u)}"><div class="ico"><span>${u.ico}</span></div>
       <div class="info"><div class="nm">${u.name}</div><div class="ds">${u.desc}</div><div class="cost">✦ ${fmt(u.cost)}</div></div></div>`;
@@ -406,7 +413,7 @@ BUILD.nova = () => {
     <div class="card"><h3>💠 Deine Sternkerne</h3>
       <div class="kv"><span>Sternkerne</span><b>${fmt(S.cores)}</b></div>
       <div class="kv"><span>Bonus (2 % je Kern)</span><b>+${fmt(S.cores * 2)} % Produktion</b></div>
-      <p class="note" style="margin-top:8px">Eine Supernova setzt Sternenstaub, Erzeuger und Upgrades zurück. Erfolge, Sternkerne und Statistik bleiben erhalten.</p></div>
+      <p class="note" style="margin-top:8px">Eine Supernova setzt Sternenstaub, deinen Kosmos und die Upgrades zurück. Erfolge, Sternkerne und Statistik bleiben erhalten.</p></div>
     <div class="card"><h3>Meilensteine</h3>`;
   MILESTONES.forEach((m, i) => {
     const got = S.cores >= m.cores;
@@ -459,7 +466,7 @@ function renderList() {
 }
 
 const TAB_ORDER = ['gens', 'ups', 'ach', 'nova', 'more'];
-const AMT_ORDER = ['1', '10', '100', 'max'];
+const AMT_ORDER = ['1', '10', '100', 'r10', 'max'];
 function setTab(t, animate) {
   tab = t;
   for (const b of el.tabs.querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === t);
@@ -471,6 +478,7 @@ function setTab(t, animate) {
   if (animate) { el.list.classList.remove('enter'); void el.list.offsetWidth; el.list.classList.add('enter'); }
 }
 function setAmt(a) {
+  if (!AMT_ORDER.includes(String(a))) a = 1;
   S.buyAmt = a;
   for (const b of el.seg.querySelectorAll('button')) b.classList.toggle('on', b.dataset.amt === String(a));
   $('.seg-thumb').style.transform = `translateX(${Math.max(0, AMT_ORDER.indexOf(String(a))) * 100}%)`;
@@ -498,7 +506,7 @@ el.tabs.addEventListener('click', e => {
 });
 el.seg.addEventListener('click', e => {
   const b = e.target.closest('button[data-amt]');
-  if (b) { HAP.fire(true); setAmt(b.dataset.amt === 'max' ? 'max' : +b.dataset.amt); }
+  if (b) { HAP.fire(true); const a = b.dataset.amt; setAmt(/^\d+$/.test(a) ? +a : a); }
 });
 
 // Die Seite ist bildschirmhoch und könnte sich auf iOS ein Stück verschieben lassen:
@@ -615,7 +623,7 @@ setTab('gens');
 renderBuffs();
 if (!hadSave) {
   modal(`<div class="em">✨</div><h3>Sternenstaub</h3>
-    <p>Tippe auf den Stern, um Sternenstaub zu sammeln. Kaufe Erzeuger, die für dich weitersammeln – sogar, wenn die App geschlossen ist.</p>
+    <p>Tippe auf den Stern, um Sternenstaub zu sammeln. Erweitere deinen Kosmos mit Funken, Kometen und Planeten, die für dich weitersammeln – sogar, wenn die App geschlossen ist.</p>
     <p style="margin-top:10px">Und halte Ausschau nach <b>Sternschnuppen</b> 🌠</p>
     <button class="btn" data-m="close">Los geht's</button>`);
   save();

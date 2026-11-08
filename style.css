@@ -1,6 +1,6 @@
 /* Sternenstaub – Design
    Zwei Ebenen nach Apples Liquid-Glass-Modell:
-   • Inhalt (Himmel, Stern, Listen, Karten): ruhige Flächen, Farbe kommt aus den Erzeugern.
+   • Inhalt (Himmel, Stern, Listen, Karten): ruhige Flächen, Farbe kommt aus den Himmelskörpern.
    • Bedienebene (Tab-Leiste, Dialoge, Meldungen): echtes Glas mit Unschärfe und Lichtkante. */
 
 :root {
@@ -106,14 +106,14 @@ svg { display: block; }
 }
 #panel::before { content: ""; position: absolute; top: 0; left: 28px; right: 28px; height: 1px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .4), transparent); }
 .phead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 18px 6px; min-height: 58px; }
-.phead h2 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+.phead h2 { min-width: 0; font-size: 22px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.seg { position: relative; display: flex; padding: 3px; border-radius: 99px; background: rgba(255, 255, 255, .07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
+.seg { position: relative; flex: none; display: flex; padding: 3px; border-radius: 99px; background: rgba(255, 255, 255, .07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
 .seg[hidden] { display: none; }
-.seg button { position: relative; z-index: 1; width: 50px; padding: 8px 0; border-radius: 99px; font-size: 13px; font-weight: 750; color: var(--muted); transition: color .25s; }
+.seg button { position: relative; z-index: 1; width: 47px; padding: 8px 0; border-radius: 99px; font-size: 13px; font-weight: 750; color: var(--muted); transition: color .25s; }
 .seg button.on { color: var(--text); }
 .seg-thumb {
-  position: absolute; z-index: 0; top: 3px; bottom: 3px; left: 3px; width: 50px; border-radius: 99px;
+  position: absolute; z-index: 0; top: 3px; bottom: 3px; left: 3px; width: 47px; border-radius: 99px;
   background: linear-gradient(180deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, .1));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 3px 10px rgba(0, 0, 0, .3);
   transition: transform .45s var(--spring);

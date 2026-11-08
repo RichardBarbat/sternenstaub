@@ -34,7 +34,7 @@ function fmtTime(sec) {
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 
-/* ---------- Erzeuger ---------- */
+/* ---------- Kosmos (Himmelskörper) ---------- */
 const GENS = [
   { name: 'Funke',          ico: '✨', cost: 10,     rate: 0.1,   hue: 48,  desc: 'Ein winziges Glimmen im Dunkeln.' },
   { name: 'Staubwolke',     ico: '☁️', cost: 120,    rate: 1,     hue: 200, desc: 'Wirbelt losen Sternenstaub zusammen.' },
@@ -127,6 +127,6 @@ const MILESTONES = [
   { cores: 25,   name: 'Traumwandler',       desc: 'Offline bis zu 48 Std. sammeln', eff: { offCap: 48 } },
   { cores: 60,   name: 'Sternenmagnet',      desc: 'Sternschnuppen erscheinen doppelt so oft', eff: { starFreq: 2 } },
   { cores: 150,  name: 'Pulsschlag',         desc: 'Der Stern tippt sich selbst – 5× pro Sekunde', eff: { autoTap: 5 } },
-  { cores: 400,  name: 'Kosmischer Rabatt',  desc: 'Alle Erzeuger 10 % günstiger', eff: { costMult: 0.9 } },
+  { cores: 400,  name: 'Kosmischer Rabatt',  desc: 'Kosmos-Käufe 10 % günstiger', eff: { costMult: 0.9 } },
   { cores: 1000, name: 'Unsterblicher Kern', desc: 'Gesamtproduktion ×2', eff: { global: 2 } },
 ];
