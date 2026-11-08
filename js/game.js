@@ -2,7 +2,7 @@
 /* Sternenstaub – Spiellogik & Oberfläche */
 
 const SAVE_KEY = 'sternenstaub-v1';
-const VERSION = '1.2';
+const VERSION = '1.3';
 const $ = s => document.querySelector(s);
 const el = {
   dust: $('#dust'), rate: $('#rate'), tapv: $('#tapv'), buffs: $('#buffs'), stage: $('#stage'), hint: $('#hint'),
@@ -147,19 +147,22 @@ function updateStar() {
     return;
   }
   const p = (performance.now() - star.t0) / star.dur;
-  if (p >= 1) { star = null; el.shoot.hidden = true; scheduleStar(); return; }
+  if (p >= 1) { star = null; el.shoot.hidden = true; FX.setStar(null); scheduleStar(); return; }
   star.x = star.x0 + (star.x1 - star.x0) * p;
   star.y = Math.min(star.maxY, Math.max(star.minY, star.y0 + (star.y1 - star.y0) * p + Math.sin(p * Math.PI * 3) * 18));
-  el.shoot.style.transform = `translate(${star.x - 38}px, ${star.y - 38}px) rotate(${p * 540}deg)`;
+  // Das Tippfeld folgt unsichtbar, gezeichnet wird die Sternschnuppe auf der Effekt-Ebene
+  el.shoot.style.transform = `translate(${star.x - 38}px, ${star.y - 38}px)`;
   FX.trail(star.x, star.y);
+  FX.setStar(star);
 }
 function pick(list) { let r = Math.random() * list.reduce((a, b) => a + b.w, 0); for (const e of list) if ((r -= e.w) < 0) return e; return list[0]; }
 function catchStar() {
   if (!star) return;
   const { x, y } = star;
-  star = null; el.shoot.hidden = true; scheduleStar();
+  star = null; el.shoot.hidden = true; FX.setStar(null); scheduleStar();
   S.starsCaught++;
-  FX.burst(x, y, 60, 45, 1.6); SND.star(); HAP.fire(true);
+  FX.burst(x, y, 60, 45, 1.6); FX.wave(x, y, 6, 70, 0.6, { h: 45, width: 4, alpha: 0.8 });
+  SND.star(); HAP.fire(true);
   const e = pick(STAR_EFFECTS);
   if (e.id === 'fund') {
     const g = Math.max(rate() * 600, tapValue() * 40, 25);
@@ -263,7 +266,7 @@ function confirmReset() {
   });
 }
 function afterStateChange() {
-  star = null; el.shoot.hidden = true;
+  star = null; el.shoot.hidden = true; FX.setStar(null);
   recalc(); applySettings(); FX.setRings(S.gens);
   setAmt(S.buyAmt); listKey = ''; renderList(); renderBuffs(); save();
 }
@@ -334,11 +337,12 @@ BUILD.gens = () => {
   for (let i = 0; i < Math.min(n + 1, GENS.length); i++) {
     const g = GENS[i];
     if (i < n) {
-      h += `<div class="row act" data-act="gen" data-i="${i}"><div class="ico">${g.ico}</div>
+      // --h: dieselbe Farbe wie der Ring dieses Erzeugers um den Stern
+      h += `<div class="row act" data-act="gen" data-i="${i}" style="--h:${g.hue}"><div class="ico"><span>${g.ico}</span></div>
         <div class="info"><div class="nm">${g.name}</div><div class="ds"></div><div class="cost"></div></div>
         <div class="cnt"></div><div class="prog"></div></div>`;
     } else {
-      h += `<div class="row locked no"><div class="ico">❔</div><div class="info"><div class="nm">???</div>
+      h += `<div class="row locked no"><div class="ico"><span>❔</span></div><div class="info"><div class="nm">???</div>
         <div class="ds">Noch unentdeckt</div><div class="cost">✦ ${fmt(g.cost * D.costMult)}</div></div></div>`;
     }
   }
@@ -357,14 +361,16 @@ UPDATE.gens = () => {
   }
 };
 
-// Upgrades
+// Upgrades – Erzeuger-Upgrades in der Ringfarbe, sonst nach Art (Tippen, Sternbild, Sternschnuppe, Offline)
+const UP_HUES = { ta: 195, sb: 275, st: 42, of: 228 };
+const upHue = u => u.kind === 'gen' ? GENS[u.gen].hue : (UP_HUES[u.id.slice(0, 2)] ?? 260);
 KEY.ups = () => visibleUps().map(u => u.id).join() + '|' + NUM.sci;
 BUILD.ups = () => {
   const list = visibleUps(), bought = Object.keys(S.ups).length;
   let h = `<p class="note" style="padding:2px 4px">${bought} von ${UPGRADES.length} gekauft</p>`;
   if (!list.length) return h + `<div class="empty">✨ Gerade keine Upgrades verfügbar.<br>Sammle weiter Sternenstaub und kaufe Erzeuger!</div>`;
   for (const u of list) {
-    h += `<div class="row act" data-act="up" data-id="${u.id}" data-c="${u.cost}"><div class="ico">${u.ico}</div>
+    h += `<div class="row act" data-act="up" data-id="${u.id}" data-c="${u.cost}" style="--h:${upHue(u)}"><div class="ico"><span>${u.ico}</span></div>
       <div class="info"><div class="nm">${u.name}</div><div class="ds">${u.desc}</div><div class="cost">✦ ${fmt(u.cost)}</div></div></div>`;
   }
   return h;
@@ -384,7 +390,7 @@ BUILD.ach = () => {
     <p>Jeder Erfolg erhöht deine Produktion dauerhaft um 1 % – aktuell <b>+${n} %</b>.</p></div>`;
   for (const a of ACH) {
     const d = !!S.ach[a.id];
-    h += `<div class="row ${d ? 'done' : 'todo'}"><div class="ico">${a.ico}</div>
+    h += `<div class="row ${d ? 'done' : 'todo'}" style="--h:42"><div class="ico"><span>${a.ico}</span></div>
       <div class="info"><div class="nm">${a.name}</div><div class="ds wrap">${a.desc()}</div></div>${d ? '<div class="chk">✓</div>' : ''}</div>`;
   }
   return h;
@@ -452,17 +458,22 @@ function renderList() {
   UPDATE[tab]();
 }
 
-function setTab(t) {
+const TAB_ORDER = ['gens', 'ups', 'ach', 'nova', 'more'];
+const AMT_ORDER = ['1', '10', '100', 'max'];
+function setTab(t, animate) {
   tab = t;
   for (const b of el.tabs.querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === t);
+  $('.tab-pill').style.transform = `translateX(${TAB_ORDER.indexOf(t) * 100}%)`;
   el.title.textContent = TITLES[t];
   el.seg.hidden = t !== 'gens';
   listKey = ''; el.list.scrollTop = 0;
   renderList(); dots();
+  if (animate) { el.list.classList.remove('enter'); void el.list.offsetWidth; el.list.classList.add('enter'); }
 }
 function setAmt(a) {
   S.buyAmt = a;
   for (const b of el.seg.querySelectorAll('button')) b.classList.toggle('on', b.dataset.amt === String(a));
+  $('.seg-thumb').style.transform = `translateX(${Math.max(0, AMT_ORDER.indexOf(String(a))) * 100}%)`;
   if (tab === 'gens') UPDATE.gens();
 }
 
@@ -483,12 +494,19 @@ el.shoot.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropag
 
 el.tabs.addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]');
-  if (b && b.dataset.tab !== tab) { SND.unlock(); setTab(b.dataset.tab); }
+  if (b && b.dataset.tab !== tab) { SND.unlock(); SND.tab(); HAP.fire(true); setTab(b.dataset.tab, true); }
 });
 el.seg.addEventListener('click', e => {
   const b = e.target.closest('button[data-amt]');
-  if (b) setAmt(b.dataset.amt === 'max' ? 'max' : +b.dataset.amt);
+  if (b) { HAP.fire(true); setAmt(b.dataset.amt === 'max' ? 'max' : +b.dataset.amt); }
 });
+
+// Die Seite ist bildschirmhoch und könnte sich auf iOS ein Stück verschieben lassen:
+// Wischen nur in scrollbaren Bereichen (Liste, Dialog) zulassen, sonst festhalten.
+document.addEventListener('touchmove', e => {
+  if (!e.target.closest('#list, .sheet')) e.preventDefault();
+}, { passive: false });
+window.addEventListener('scroll', () => { if (window.scrollY || window.scrollX) window.scrollTo(0, 0); });
 el.list.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
@@ -531,17 +549,25 @@ let fitKey = '';
 function fitViewport() {
   const h = measureHeight();
   const key = window.innerWidth + 'x' + h;
-  if (key === fitKey) return;
-  fitKey = key;
-  document.documentElement.style.setProperty('--app-h', h + 'px');
-  FX.resize();
+  if (key !== fitKey) {
+    fitKey = key;
+    document.documentElement.style.setProperty('--app-h', h + 'px');
+    FX.resize();
+  }
+  // Zielpunkt für den Staub, der beim Tippen in den Zähler fliegt
+  const d = el.dust.getBoundingClientRect();
+  FX.setCollect(d.left + d.width / 2, d.top + d.height / 2);
 }
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else fitViewport(); });
 window.addEventListener('pagehide', save);
 window.addEventListener('resize', fitViewport);
 window.addEventListener('orientationchange', () => setTimeout(fitViewport, 300));
-if ('ResizeObserver' in window) new ResizeObserver(() => FX.layout()).observe(el.stage);
+if ('ResizeObserver' in window) new ResizeObserver(() => {
+  FX.layout();
+  const d = el.dust.getBoundingClientRect();
+  FX.setCollect(d.left + d.width / 2, d.top + d.height / 2);
+}).observe(el.stage);
 
 /* ======================= Spielschleife ======================= */
 let acc = { ui: 0, ach: 0, save: 0, auto: 0 };
@@ -565,7 +591,7 @@ function frame(ms) {
   }
   updateStar();
   hud();
-  if (acc.ui >= 0.2) { acc.ui = 0; renderList(); renderBuffs(); dots(); }
+  if (acc.ui >= 0.2) { acc.ui = 0; renderList(); renderBuffs(); dots(); FX.setRate(baseRate()); }
   if (acc.ach >= 0.5) { acc.ach = 0; checkAch(); }
   if (acc.save >= 5) { acc.save = 0; save(); }
   FX.setHue(orbHue(S.runEarned));
@@ -579,6 +605,8 @@ applySettings();
 fitViewport();
 // iOS ändert die gemeldete Höhe kurz nach dem Start teils ohne resize-Ereignis
 [300, 1000, 2500].forEach(ms => setTimeout(fitViewport, ms));
+// Ein winziges Anscrollen bringt iOS dazu, die Viewport-Höhe neu zu berechnen (wird sofort zurückgesetzt)
+setTimeout(() => { window.scrollTo(0, 1); requestAnimationFrame(() => { window.scrollTo(0, 0); fitViewport(); }); }, 150);
 FX.setRings(S.gens);
 FX.orb.hue = FX.orb.hueT = orbHue(S.runEarned);
 if (S.taps >= 5) el.hint.classList.add('gone');
