@@ -70,7 +70,11 @@ function canPay(c) { return S.dust >= c * (1 - 1e-9); }
 function pay(c) { S.dust = Math.max(0, S.dust - c); }
 
 function unitCost(i) { return GENS[i].cost * D.costMult * Math.pow(1.15, S.gens[i]); }
-function costOf(i, n) { return unitCost(i) * (Math.pow(1.15, n) - 1) / 0.15; }
+// Kosten immer auf ganze Zahlen aufrunden (sonst zeigt 9,999… als „9“ an)
+function costOf(i, n) {
+  const c = n === 1 ? unitCost(i) : unitCost(i) * (Math.pow(1.15, n) - 1) / 0.15;
+  return Math.ceil(c * (1 - 1e-12));
+}
 function maxAfford(i) { return Math.max(0, Math.floor(Math.log(S.dust * 0.15 / unitCost(i) + 1) / Math.log(1.15))); }
 function buyCount(i) { return S.buyAmt === 'max' ? Math.max(1, maxAfford(i)) : S.buyAmt; }
 
