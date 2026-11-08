@@ -503,9 +503,22 @@ el.list.addEventListener('click', e => {
 // Zoom-Gesten und Doppeltipp-Zoom verhindern
 ['gesturestart', 'gesturechange', 'dblclick'].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
 
-document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+// iOS-Home-Bildschirm-Apps melden eine um die Statusleiste zu kleine Layout-Höhe,
+// window.innerHeight stimmt aber. Die größere Höhe nehmen und Zeichenfläche neu anpassen.
+let fitKey = '';
+function fitViewport() {
+  const h = Math.max(window.innerHeight, document.documentElement.clientHeight);
+  const key = window.innerWidth + 'x' + h;
+  if (key === fitKey) return;
+  fitKey = key;
+  document.documentElement.style.setProperty('--app-h', h + 'px');
+  FX.resize();
+}
+
+document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else fitViewport(); });
 window.addEventListener('pagehide', save);
-window.addEventListener('resize', () => FX.resize());
+window.addEventListener('resize', fitViewport);
+window.addEventListener('orientationchange', () => setTimeout(fitViewport, 300));
 if ('ResizeObserver' in window) new ResizeObserver(() => FX.layout()).observe(el.stage);
 
 /* ======================= Spielschleife ======================= */
@@ -541,7 +554,8 @@ function frame(ms) {
 /* ======================= Start ======================= */
 recalc();
 applySettings();
-FX.resize();
+fitViewport();
+setTimeout(fitViewport, 400); // iOS liefert die endgültige Höhe beim Start manchmal verzögert
 FX.setRings(S.gens);
 FX.orb.hue = FX.orb.hueT = orbHue(S.runEarned);
 if (S.taps >= 5) el.hint.classList.add('gone');
@@ -558,6 +572,13 @@ if (!hadSave) {
 requestAnimationFrame(frame);
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  // Kommt eine neue Version an, speichern und einmal neu laden – so sind Updates sofort aktiv.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true; save(); location.reload();
+  });
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});

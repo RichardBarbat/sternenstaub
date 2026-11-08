@@ -14,7 +14,10 @@ const FX = (() => {
 
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth; H = window.innerHeight;
+    // Pixelpuffer exakt an die tatsächliche CSS-Größe koppeln, sonst wird alles verzerrt gezeichnet
+    const box = cv.getBoundingClientRect();
+    W = Math.round(box.width) || window.innerWidth;
+    H = Math.round(box.height) || window.innerHeight;
     cv.width = bg.width = Math.round(W * DPR);
     cv.height = bg.height = Math.round(H * DPR);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
