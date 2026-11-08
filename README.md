@@ -20,4 +20,12 @@ Reines HTML/CSS/JavaScript ohne Build-Schritt. Lokal starten:
 python -m http.server 8765
 ```
 
-Bei Änderungen die Versionsnummer `CACHE` in `sw.js` erhöhen, damit installierte Apps das Update laden.
+Bei jeder Änderung die Version erhöhen, damit installierte Apps das Update laden:
+
+```bash
+node version.mjs 1.3
+```
+
+Das Skript setzt die Version in `js/game.js`, `sw.js`, `version.json` und in den `?v=`-Angaben der `index.html`.
+Die App lädt online immer zuerst vom Netz (Offline-Kopie nur als Rückfall) und prüft beim Start und bei jeder
+Rückkehr in den Vordergrund `version.json`.

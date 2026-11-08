@@ -2,7 +2,7 @@
 /* Sternenstaub – Spiellogik & Oberfläche */
 
 const SAVE_KEY = 'sternenstaub-v1';
-const VERSION = '1.1';
+const VERSION = '1.2';
 const $ = s => document.querySelector(s);
 const el = {
   dust: $('#dust'), rate: $('#rate'), tapv: $('#tapv'), buffs: $('#buffs'), stage: $('#stage'), hint: $('#hint'),
@@ -132,7 +132,8 @@ function scheduleStar() { S.nextStar = Date.now() + (55 + Math.random() * 80) * 
 function spawnStar() {
   // Nur im Himmel fliegen – zwischen Anzeige oben und Panel unten, nie über die Liste
   const W = innerWidth, st = el.stage.getBoundingClientRect(), fromLeft = Math.random() < 0.5;
-  const minY = st.top + 24, maxY = Math.max(minY + 40, st.bottom - 44);
+  // 56px Abstand: das gedrehte 76px-Tippfeld ist diagonal bis zu ~54px „halb breit“
+  const minY = st.top + 24, maxY = Math.max(minY + 40, st.bottom - 56);
   const y0 = minY + Math.random() * (maxY - minY) * 0.6;
   star = {
     x0: fromLeft ? -40 : W + 40, x1: fromLeft ? W + 40 : -40, y0, y1: y0 + Math.random() * (maxY - y0), minY, maxY,
@@ -593,14 +594,55 @@ if (!hadSave) {
 }
 requestAnimationFrame(frame);
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  // Kommt eine neue Version an, speichern und einmal neu laden – so sind Updates sofort aktiv.
-  const hadController = !!navigator.serviceWorker.controller;
-  let reloading = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController || reloading) return;
-    reloading = true; save(); location.reload();
-  });
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+/* ---------- Updates ----------
+   1. Service Worker ohne HTTP-Zwischenspeicher prüfen (updateViaCache: 'none') – beim Start und
+      jedes Mal, wenn die App wieder in den Vordergrund kommt (iOS startet sie oft nicht neu).
+   2. Wechselt der Service Worker, speichern und einmal neu laden.
+   3. Rückfallebene: version.json vergleichen. Ist online eine neuere Version, Spielstand sichern,
+      Service Worker + Speicher leeren und neu laden. Pro Version nur ein Versuch → keine Schleife. */
+const UPD_KEY = 'sternenstaub-update-try';
+let swReg = null, lastCheck = 0, updating = false;
+
+async function hardUpdate(version) {
+  if (updating) return;
+  updating = true;
+  try { localStorage.setItem(UPD_KEY, version + '|' + Date.now()); } catch (e) {}
+  save();
+  toast(`✨ <b>Neue Version ${version}</b><small>wird geladen…</small>`);
+  try {
+    const regs = navigator.serviceWorker ? await navigator.serviceWorker.getRegistrations() : [];
+    await Promise.all(regs.map(r => r.unregister()));
+    const keys = window.caches ? await caches.keys() : [];
+    await Promise.all(keys.map(k => caches.delete(k)));
+  } catch (e) {}
+  setTimeout(() => location.reload(), 900);
 }
+
+async function checkForUpdate() {
+  const now = Date.now();
+  if (now - lastCheck < 30000 || !navigator.onLine || !location.protocol.startsWith('http')) return;
+  lastCheck = now;
+  if (swReg) swReg.update().catch(() => {});
+  try {
+    const r = await fetch('version.json?t=' + now, { cache: 'no-store' });
+    if (!r.ok) return;
+    const { version } = await r.json();
+    let tried = ''; try { tried = localStorage.getItem(UPD_KEY) || ''; } catch (e) {}
+    const [tv, tt] = tried.split('|');
+    const recentlyTried = tv === version && now - (+tt || 0) < 15 * 60 * 1000;
+    if (version && version !== VERSION && !recentlyTried) hardUpdate(version);
+  } catch (e) {}
+}
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || updating) return;
+    updating = true; save(); location.reload();
+  });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => { swReg = r; }).catch(() => {});
+}
+setTimeout(checkForUpdate, 1500);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+window.addEventListener('online', checkForUpdate);
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});

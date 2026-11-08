@@ -1,6 +1,10 @@
-/* Sternenstaub – Service Worker: speichert alle Dateien, damit das Spiel offline läuft.
-   Bei Änderungen am Spiel die Versionsnummer erhöhen. */
-const CACHE = 'sternenstaub-v4';
+/* Sternenstaub – Service Worker
+   Netz zuerst: Ist das Gerät online, kommt immer die neueste Version (kurzer Abgleich per ETag).
+   Nur offline oder bei sehr langsamem Netz wird die gespeicherte Kopie genutzt.
+   Version erhöhen mit:  node version.mjs <neue-version> */
+const VERSION = '1.2';
+const CACHE = 'sternenstaub-' + VERSION;
+const TIMEOUT = 2500;
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest',
   './js/data.js', './js/fx.js', './js/game.js',
@@ -8,7 +12,12 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache: 'reload' – am HTTP-Zwischenspeicher vorbei, sonst landen evtl. alte Dateien im neuen Speicher
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
@@ -19,18 +28,28 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Zuerst aus dem Speicher (sofort & offline), im Hintergrund aktualisieren.
 self.addEventListener('fetch', e => {
-  const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
-  e.respondWith(
-    caches.open(CACHE).then(async cache => {
-      const hit = await cache.match(req, { ignoreSearch: true });
-      const net = fetch(req).then(res => {
-        if (res.ok) cache.put(req, res.clone());
-        return res;
-      }).catch(() => hit);
-      return hit || net;
-    })
-  );
+  const req = e.request, url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== location.origin) return;
+  if (url.pathname.endsWith('/version.json')) return; // Versions-Check geht immer direkt ans Netz
+
+  const key = url.origin + url.pathname; // ohne ?v=…, damit offline jede Version gefunden wird
+  const network = fetch(url.href, { cache: 'no-cache', credentials: 'same-origin' }).then(async res => {
+    if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { res });
+    const copy = res.clone();
+    await (await caches.open(CACHE)).put(key, copy);
+    return res;
+  });
+  e.waitUntil(network.then(() => {}, () => {}));
+
+  e.respondWith((async () => {
+    try {
+      return await Promise.race([network, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), TIMEOUT))]);
+    } catch (err) {
+      const hit = await caches.match(key, { ignoreSearch: true });
+      if (hit) return hit;
+      if (err && err.res) return err.res;
+      return network.catch(e2 => (e2 && e2.res) || Response.error());
+    }
+  })());
 });

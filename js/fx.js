@@ -4,7 +4,12 @@
 const FX = (() => {
   const cv = document.getElementById('sky');
   const ctx = cv.getContext('2d');
-  const fxCv = document.getElementById('fx');
+  // Falls eine ältere index.html ohne Effekt-Ebene geladen wurde: Ebene selbst anlegen
+  const fxCv = document.getElementById('fx') || (() => {
+    const c = document.createElement('canvas'); c.id = 'fx';
+    c.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:var(--app-h,100%);z-index:20;pointer-events:none';
+    document.body.appendChild(c); return c;
+  })();
   const tctx = fxCv.getContext('2d');
   const bg = document.createElement('canvas');
   const bctx = bg.getContext('2d');
