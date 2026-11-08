@@ -2,7 +2,7 @@
 /* Sternenstaub – Spiellogik & Oberfläche */
 
 const SAVE_KEY = 'sternenstaub-v1';
-const VERSION = '1.0';
+const VERSION = '1.1';
 const $ = s => document.querySelector(s);
 const el = {
   dust: $('#dust'), rate: $('#rate'), tapv: $('#tapv'), buffs: $('#buffs'), stage: $('#stage'), hint: $('#hint'),
@@ -130,9 +130,12 @@ function burstAt(row) { if (!row) return; const r = row.getBoundingClientRect();
 let star = null;
 function scheduleStar() { S.nextStar = Date.now() + (55 + Math.random() * 80) * 1000 / D.starFreq; }
 function spawnStar() {
-  const W = innerWidth, H = innerHeight, fromLeft = Math.random() < 0.5, y0 = H * (0.12 + Math.random() * 0.2);
+  // Nur im Himmel fliegen – zwischen Anzeige oben und Panel unten, nie über die Liste
+  const W = innerWidth, st = el.stage.getBoundingClientRect(), fromLeft = Math.random() < 0.5;
+  const minY = st.top + 24, maxY = Math.max(minY + 40, st.bottom - 44);
+  const y0 = minY + Math.random() * (maxY - minY) * 0.6;
   star = {
-    x0: fromLeft ? -40 : W + 40, x1: fromLeft ? W + 40 : -40, y0, y1: y0 + H * (0.08 + Math.random() * 0.22),
+    x0: fromLeft ? -40 : W + 40, x1: fromLeft ? W + 40 : -40, y0, y1: y0 + Math.random() * (maxY - y0), minY, maxY,
     t0: performance.now(), dur: (8000 + Math.random() * 3000) * D.starLife, x: -100, y: -100,
   };
   el.shoot.hidden = false;
@@ -145,7 +148,7 @@ function updateStar() {
   const p = (performance.now() - star.t0) / star.dur;
   if (p >= 1) { star = null; el.shoot.hidden = true; scheduleStar(); return; }
   star.x = star.x0 + (star.x1 - star.x0) * p;
-  star.y = star.y0 + (star.y1 - star.y0) * p + Math.sin(p * Math.PI * 3) * 18;
+  star.y = Math.min(star.maxY, Math.max(star.minY, star.y0 + (star.y1 - star.y0) * p + Math.sin(p * Math.PI * 3) * 18));
   el.shoot.style.transform = `translate(${star.x - 38}px, ${star.y - 38}px) rotate(${p * 540}deg)`;
   FX.trail(star.x, star.y);
 }
@@ -431,7 +434,8 @@ BUILD.more = () => {
       <button class="btn ghost" data-act="export">📤 Exportieren</button>
       <button class="btn ghost" data-act="import">📥 Importieren</button>
       <button class="btn danger" data-act="reset">Alles zurücksetzen</button></div>
-    <p class="note" style="text-align:center;margin:14px 0 4px">Sternenstaub ${VERSION} · offline spielbar</p>`;
+    <p class="note" style="text-align:center;margin:14px 0 4px">Sternenstaub ${VERSION} · offline spielbar<br>
+      <span style="font-size:11px;opacity:.55">Anzeige ${VIEW.h} · i${VIEW.inner} c${VIEW.client} v${VIEW.vh} s${VIEW.scr}${STANDALONE ? ' · App' : ''}</span></p>`;
 };
 UPDATE.more = () => {
   const f = (k, v) => put(el.list.querySelector(`[data-f="${k}"]`), v);
@@ -503,11 +507,28 @@ el.list.addEventListener('click', e => {
 // Zoom-Gesten und Doppeltipp-Zoom verhindern
 ['gesturestart', 'gesturechange', 'dblclick'].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
 
-// iOS-Home-Bildschirm-Apps melden eine um die Statusleiste zu kleine Layout-Höhe,
-// window.innerHeight stimmt aber. Die größere Höhe nehmen und Zeichenfläche neu anpassen.
+// iOS-Home-Bildschirm-Apps (Statusleiste „black-translucent“) zeichnen ab der Bildschirmoberkante,
+// melden aber eine um die Statusleiste zu kurze Layout-Höhe – innerHeight schrumpft kurz nach dem
+// Start ebenfalls mit. Verlässlich sind dort Bildschirmhöhe bzw. 100vh. Nur übernehmen, wenn die
+// Abweichung wie eine Statusleiste aussieht (≤ 80px), damit z. B. iPad-Split-View nicht überläuft.
+const vhProbe = document.createElement('div');
+vhProbe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:100vh;visibility:hidden;pointer-events:none';
+document.body.appendChild(vhProbe);
+const VIEW = {};
+function measureHeight() {
+  const inner = window.innerHeight, client = document.documentElement.clientHeight;
+  const vh = Math.round(vhProbe.getBoundingClientRect().height);
+  const portrait = window.innerWidth <= Math.max(inner, client);
+  const scr = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+  let h = Math.max(inner, client);
+  if (STANDALONE) for (const c of [scr, vh]) if (c > h && c - h <= 80) h = c;
+  Object.assign(VIEW, { inner, client, vh, scr, h });
+  return h;
+}
+
 let fitKey = '';
 function fitViewport() {
-  const h = Math.max(window.innerHeight, document.documentElement.clientHeight);
+  const h = measureHeight();
   const key = window.innerWidth + 'x' + h;
   if (key === fitKey) return;
   fitKey = key;
@@ -555,7 +576,8 @@ function frame(ms) {
 recalc();
 applySettings();
 fitViewport();
-setTimeout(fitViewport, 400); // iOS liefert die endgültige Höhe beim Start manchmal verzögert
+// iOS ändert die gemeldete Höhe kurz nach dem Start teils ohne resize-Ereignis
+[300, 1000, 2500].forEach(ms => setTimeout(fitViewport, ms));
 FX.setRings(S.gens);
 FX.orb.hue = FX.orb.hueT = orbHue(S.runEarned);
 if (S.taps >= 5) el.hint.classList.add('gone');

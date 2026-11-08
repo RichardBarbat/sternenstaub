@@ -1,6 +1,6 @@
 /* Sternenstaub – Service Worker: speichert alle Dateien, damit das Spiel offline läuft.
    Bei Änderungen am Spiel die Versionsnummer erhöhen. */
-const CACHE = 'sternenstaub-v3';
+const CACHE = 'sternenstaub-v4';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest',
   './js/data.js', './js/fx.js', './js/game.js',

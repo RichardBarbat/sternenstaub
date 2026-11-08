@@ -4,6 +4,8 @@
 const FX = (() => {
   const cv = document.getElementById('sky');
   const ctx = cv.getContext('2d');
+  const fxCv = document.getElementById('fx');
+  const tctx = fxCv.getContext('2d');
   const bg = document.createElement('canvas');
   const bctx = bg.getContext('2d');
   const TAU = Math.PI * 2, TILT = -0.22;
@@ -18,9 +20,10 @@ const FX = (() => {
     const box = cv.getBoundingClientRect();
     W = Math.round(box.width) || window.innerWidth;
     H = Math.round(box.height) || window.innerHeight;
-    cv.width = bg.width = Math.round(W * DPR);
-    cv.height = bg.height = Math.round(H * DPR);
+    cv.width = bg.width = fxCv.width = Math.round(W * DPR);
+    cv.height = bg.height = fxCv.height = Math.round(H * DPR);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    tctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     paintBg(); makeStars(); layout();
   }
 
@@ -151,6 +154,18 @@ const FX = (() => {
     drawRings(t, false);
     drawOrb(t);
     drawRings(t, true);
+    ctx.globalAlpha = 1;
+    drawTop(dt);
+  }
+
+  // Obere Ebene: Schweif, Partikel, Zahlen & Blitz – liegt über Panel und Menü
+  let topDirty = true;
+  function drawTop(dt) {
+    const ctx = tctx;
+    const busy = trail.length || parts.length || floats.length || orb.flash > 0;
+    if (busy || topDirty) ctx.clearRect(0, 0, W, H);
+    topDirty = busy;
+    if (!busy) return;
 
     // Schweif der Sternschnuppe
     for (let i = trail.length - 1; i >= 0; i--) {
