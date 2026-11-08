@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sternenstaub">
+<meta name="theme-color" content="#07051a">
+<meta name="format-detection" content="telephone=no">
+<title>Sternenstaub</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="sky"></canvas>
+
+<div id="app">
+  <header id="hud">
+    <div class="amount"><span class="di">✦</span><span id="dust">0</span></div>
+    <div class="sub"><b id="rate">0</b>/s · <b id="tapv">1</b> pro Tipp</div>
+    <div id="buffs"></div>
+  </header>
+
+  <section id="stage" aria-label="Tippe auf den Stern">
+    <div id="toasts"></div>
+    <div id="hint">Tippe auf den Stern ✨</div>
+  </section>
+
+  <main id="panel">
+    <div class="phead">
+      <h2 id="ptitle">Erzeuger</h2>
+      <div class="seg" id="seg">
+        <button data-amt="1">×1</button><button data-amt="10">×10</button><button data-amt="100">×100</button><button data-amt="max">Max</button>
+      </div>
+    </div>
+    <div id="list"></div>
+  </main>
+
+  <nav id="tabs">
+    <button data-tab="gens"><span class="ti">🪐</span><span>Erzeuger</span></button>
+    <button data-tab="ups"><span class="ti">⚡</span><span>Upgrades</span><i class="dot" id="dotUp"></i></button>
+    <button data-tab="ach"><span class="ti">🏆</span><span>Erfolge</span></button>
+    <button data-tab="nova"><span class="ti">💥</span><span>Supernova</span><i class="dot" id="dotNova"></i></button>
+    <button data-tab="more"><span class="ti">⚙️</span><span>Mehr</span></button>
+  </nav>
+</div>
+
+<button id="shoot" hidden aria-label="Sternschnuppe">⭐</button>
+<div id="modal" hidden><div class="sheet" id="sheet"></div></div>
+<label id="hapLabel" hidden><input type="checkbox" switch></label>
+
+<script src="js/data.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
