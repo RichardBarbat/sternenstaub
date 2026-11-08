@@ -1,8 +1,19 @@
-# ✨ Sternenstaub
+# 🕳️ Sternenstaub
 
-Ein gemütlicher Idle-Clicker unter den Sternen, gebaut als Web-App (PWA) fürs iPhone.
+Ein Idle-Clicker fürs iPhone, gebaut als Web-App (PWA): Du bist ein winziges Schwarzes Loch und verschlingst das Universum.
 
 **Spielen:** https://richardbarbat.github.io/sternenstaub/
+
+## So spielt es sich
+
+- **Tippen** saugt Materie an. Manche Tipps sind **kritische Treffer** (×10).
+- **Schnell tippen** füllt die Hunger-Leiste – ist sie voll, folgt ein **Fressrausch** (alles ×5).
+- **Beute** fliegt vorbei: Gesteinsbrocken, Kometen, Satelliten, goldene Kometen mit Effekten und Kapseln.
+- Himmelskörper im **Orbit** kreisen ums Loch und füttern es weiter – auch offline.
+- **Ereignisse:** Asteroidenschwarm, Großbeute (rechtzeitig zerreißen) und ein Rivale, der Masse absaugt.
+- **Fähigkeiten:** Sog, Jet und Zeitdehnung, mit Abklingzeit.
+- **Kapseln** und die **Tagesbeute** bringen Masse, Boni, Himmelskörper und Dunkle Materie.
+- Das Loch **wächst** in Stufen bis zum Quasar und darüber hinaus; ein **Urknall** startet neu mit Dunkler Materie.
 
 ## Auf dem iPhone installieren
 
@@ -14,7 +25,14 @@ Der Spielstand wird auf dem Gerät gespeichert. Unter **Mehr → Exportieren** l
 
 ## Entwicklung
 
-Reines HTML/CSS/JavaScript ohne Build-Schritt. Lokal starten:
+Reines HTML/CSS/JavaScript ohne Build-Schritt:
+
+- `js/data.js` – Zahlen, Himmelskörper, Upgrades, Erfolge, Stufen, Beute, Kapseln
+- `js/fx.js` – Grafik (Schwarzes Loch, Scheibe, Orbit, Effekte), Töne, Vibration
+- `js/action.js` – Beute, Krits, Fressrausch, Ereignisse, Fähigkeiten, Kapseln, Tagesbeute
+- `js/game.js` – Spielstand, Wirtschaft, Oberfläche, Spielschleife, Updates
+
+Lokal starten:
 
 ```bash
 python -m http.server 8765
@@ -23,7 +41,7 @@ python -m http.server 8765
 Bei jeder Änderung die Version erhöhen, damit installierte Apps das Update laden:
 
 ```bash
-node version.mjs 1.3
+node version.mjs 2.0
 ```
 
 Das Skript setzt die Version in `js/game.js`, `sw.js`, `version.json` und in den `?v=`-Angaben der `index.html`.

@@ -9,7 +9,7 @@ if (!/^\d+(\.\d+)*$/.test(v || '')) { console.error('Aufruf: node version.mjs <v
 const root = dirname(fileURLToPath(import.meta.url));
 const edit = (file, re, to) => {
   const p = join(root, file), src = readFileSync(p, 'utf8'), out = src.replace(re, to);
-  if (out === src) throw new Error(`${file}: Version nicht gefunden`);
+  if (!new RegExp(re.source).test(src)) throw new Error(`${file}: Version nicht gefunden`);
   writeFileSync(p, out);
   console.log('✓', file);
 };

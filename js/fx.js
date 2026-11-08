@@ -1,27 +1,42 @@
 'use strict';
-/* Sternenstaub – Grafik (zwei Canvas-Ebenen), Töne & Vibration
-   #sky  : Himmel, Nebel, Sterne, Stern mit Umlaufbahnen (Inhaltsebene)
-   #fx   : Funken, Druckwellen, Zahlen, Sternschnuppe – liegt über Panel & Menü */
+/* Sternenstaub – Grafik, Töne & Vibration
+   #sky : Himmel mit Gravitationslinse, Schwarzes Loch mit Akkretionsscheibe, Orbit und Beute (Inhaltsebene)
+   #fx  : Funken, Druckwellen, Zahlen, Blitze – liegt über Panel & Menü */
 
 const FX = (() => {
-  const cv = document.getElementById('sky');
-  const ctx = cv.getContext('2d');
-  // Falls eine ältere index.html ohne Effekt-Ebene geladen wurde: Ebene selbst anlegen
+  const mk = (w = 2, h = 2) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  const cv = document.getElementById('sky'), ctx = cv.getContext('2d');
   const fxCv = document.getElementById('fx') || (() => {
-    const c = document.createElement('canvas'); c.id = 'fx';
+    const c = mk(); c.id = 'fx';
     c.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:20;pointer-events:none';
     document.body.appendChild(c); return c;
   })();
   const tctx = fxCv.getContext('2d');
-  const bg = document.createElement('canvas'), bctx = bg.getContext('2d');
-  const veil = document.createElement('canvas'), vctx = veil.getContext('2d');
-  const TAU = Math.PI * 2, TILT = -0.22;
+  const bg = mk(), bctx = bg.getContext('2d');
+  const veil = mk(), vctx = veil.getContext('2d');
+  const TAU = Math.PI * 2;
   const RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const orb = { x: 0, y: 0, r: 60, ringMax: 160, squish: 0, hue: 48, hueT: 48, flash: 0, pulseF: 1.6 };
-  let W = 0, H = 0, DPR = 1, stars = [], rings = [], lastT = 0, head = null;
-  const parts = [], floats = [], trail = [], waves = [], dust = [];
-  const target = { x: 0, y: 0 };
   const hn = h => ((h % 360) + 360) % 360;
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  let W = 0, H = 0, DPR = 1, stars = [], lastT = 0, clock = 0, shakeOn = true, sfCur = 0;
+
+  // Kleiner, reproduzierbarer Zufall (gleiche Form für gleiche Variante)
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), a | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /* ---------- Das Schwarze Loch ---------- */
+  const hole = {
+    x: 0, y: 0, R: 4, Rt: 24, Rmin: 18, Rmax: 56, orbitR: 180, top: 0, bottom: 0,
+    hue: 14, hueT: 14, sat: 100, satT: 100, roll: -0.12, k: 0.23, spin: 0,
+    feed: 0, gulp: 0, rausch: 0, rauschT: 0, jet: 0, jetT: 0, jetBase: 0, sog: 0, sogT: 0, warp: 0, shake: 0, shakeAmp: 0, shakeDur: 0.3,
+  };
 
   /* ---------- Aufbau ---------- */
   function resize() {
@@ -38,10 +53,23 @@ const FX = (() => {
 
   function layout() {
     const st = document.getElementById('stage').getBoundingClientRect();
-    orb.x = st.left + st.width / 2;
-    orb.y = st.top + st.height / 2;
-    orb.r = Math.max(30, Math.min(st.height * 0.27, st.width * 0.19, 88));
-    orb.ringMax = Math.max(orb.r * 1.6, Math.min(st.width / 2 - 12, orb.r * 3.4));
+    hole.x = st.left + st.width / 2;
+    hole.y = st.top + st.height * 0.5;
+    hole.top = st.top; hole.bottom = st.bottom;
+    // Scheibe (2,75 R) soll neben die Knöpfe am Rand passen, das Loch nicht zu hoch werden
+    hole.Rmax = clamp(Math.min(st.height * 0.17, (st.width / 2 - 52) / 2.75), 20, 60);
+    hole.Rmin = Math.max(14, hole.Rmax * 0.55);
+    hole.orbitR = Math.max(70, Math.min(st.width / 2 - 8, (st.height / 2 - 14) / 0.42));
+    setStage(sfCur);
+  }
+
+  function setStage(sf) {
+    sfCur = sf;
+    const i = Math.min(STAGES.length - 1, Math.floor(sf)), j = Math.min(STAGES.length - 1, i + 1), f = sf - i;
+    hole.hueT = STAGES[i].hue + (STAGES[j].hue - STAGES[i].hue) * f;
+    hole.satT = STAGES[i].sat + (STAGES[j].sat - STAGES[i].sat) * f;
+    hole.Rt = hole.Rmin + (hole.Rmax - hole.Rmin) * Math.pow(Math.min(1, sf / 9), 0.8);
+    hole.jetBase = sf >= 6 ? 0.4 : 0;
   }
 
   function blob(c, x, y, r, col) {
@@ -54,17 +82,17 @@ const FX = (() => {
     const c = bctx, M = Math.max(W, H);
     c.setTransform(DPR, 0, 0, DPR, 0, 0);
     const g = c.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#0b0628'); g.addColorStop(0.5, '#120a34'); g.addColorStop(1, '#05031a');
+    g.addColorStop(0, '#09051f'); g.addColorStop(0.5, '#0e0829'); g.addColorStop(1, '#040214');
     c.fillStyle = g; c.fillRect(0, 0, W, H);
-    blob(c, W * 0.1, H * 0.14, M * 0.55, 'rgba(120,60,215,0.30)');
-    blob(c, W * 0.98, H * 0.36, M * 0.42, 'rgba(235,80,170,0.15)');
-    blob(c, W * 0.3, H * 0.9, M * 0.6, 'rgba(45,110,225,0.20)');
-    blob(c, W * 0.75, H * 0.08, M * 0.3, 'rgba(90,170,255,0.08)');
+    blob(c, W * 0.1, H * 0.14, M * 0.55, 'rgba(110,55,205,0.26)');
+    blob(c, W * 0.98, H * 0.36, M * 0.42, 'rgba(225,75,160,0.13)');
+    blob(c, W * 0.3, H * 0.9, M * 0.6, 'rgba(45,100,215,0.18)');
+    blob(c, W * 0.75, H * 0.08, M * 0.3, 'rgba(90,170,255,0.07)');
     // feiner Sternenstaub & Milchstraßen-Band
     c.save(); c.translate(W / 2, H * 0.42); c.rotate(-0.5);
     for (let i = 0, n = W * H / 260; i < n; i++) {
       const x = (Math.random() - 0.5) * M * 1.6, y = (Math.random() + Math.random() + Math.random() - 1.5) * M * 0.09;
-      c.fillStyle = `rgba(${200 + Math.random() * 55 | 0},${190 + Math.random() * 50 | 0},255,${Math.random() * 0.22})`;
+      c.fillStyle = `rgba(${200 + Math.random() * 55 | 0},${190 + Math.random() * 50 | 0},255,${Math.random() * 0.2})`;
       c.fillRect(x, y, 1, 1);
     }
     c.restore();
@@ -79,7 +107,7 @@ const FX = (() => {
     veil.width = Math.max(1, Math.round(W * 0.6)); veil.height = Math.max(1, Math.round(H * 0.6));
     const c = vctx, w = veil.width, h = veil.height;
     c.clearRect(0, 0, w, h);
-    const cols = ['rgba(160,90,255,0.22)', 'rgba(255,110,190,0.14)', 'rgba(80,160,255,0.16)', 'rgba(255,200,140,0.08)'];
+    const cols = ['rgba(160,90,255,0.2)', 'rgba(255,110,190,0.12)', 'rgba(80,160,255,0.15)', 'rgba(255,200,140,0.07)'];
     for (let i = 0; i < 9; i++) blob(c, Math.random() * w, Math.random() * h, (0.15 + Math.random() * 0.3) * Math.max(w, h), cols[i % cols.length]);
     // Ränder weich ausblenden, damit nie eine Kante als Streifen sichtbar wird
     c.globalCompositeOperation = 'destination-in';
@@ -101,208 +129,868 @@ const FX = (() => {
     }
   }
 
-  /* ---------- Stern ---------- */
-  function drawOrb(t) {
-    const h = hn(orb.hue), x = orb.x, y = orb.y;
-    const sh = h > 120 && h < 300 ? 1 : -1; // Farbverschiebung immer weg von Grün
-    const pulse = RM ? 0 : Math.sin(t * orb.pulseF);
-    const r = orb.r * (1 - 0.07 * orb.squish + 0.014 * pulse);
+  /* ---------- Akkretionsscheibe ----------
+     Zwei Graustufen-Texturen (innen dreht schneller als außen) werden pro Bild gedreht, eingefärbt
+     und mit Doppler-Helligkeit versehen. Daraus entstehen hintere Scheibe, Lichtbogen (Linseneffekt)
+     und vordere Scheibe. */
+  const TEX = 512, texIn = mk(TEX, TEX), texOut = mk(TEX, TEX);
+  const work = mk(440, 440), wctx = work.getContext('2d');
+  const halo = mk(), hctx = halo.getContext('2d');
+  const RI = 0.42; // Innenrand der Scheibe relativ zum Außenrand
 
-    // Halo
-    let g = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 3.2);
-    g.addColorStop(0, `hsla(${h},100%,72%,${0.46 + 0.06 * pulse})`);
-    g.addColorStop(0.32, `hsla(${hn(h + sh * 25)},100%,62%,.15)`);
-    g.addColorStop(1, 'hsla(0,0%,0%,0)');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, TAU); ctx.fill();
-
-    ctx.save(); ctx.translate(x, y); ctx.globalCompositeOperation = 'lighter';
-    // lange Strahlen
-    const L = r * 2.3;
-    const rg = ctx.createLinearGradient(0, 0, L, 0);
-    rg.addColorStop(0, `hsla(${hn(h + 10)},100%,82%,.30)`); rg.addColorStop(1, 'hsla(0,0%,100%,0)');
-    ctx.fillStyle = rg;
-    for (let i = 0; i < 12; i++) {
-      const len = 0.62 + 0.3 * Math.abs(Math.sin(i * 2.39 + t * 0.35)) + 0.1 * Math.sin(t * 1.3 + i);
-      ctx.save(); ctx.rotate(t * 0.07 + i * TAU / 12 + (i % 2) * 0.12); ctx.scale(len, i % 2 ? 0.55 : 1);
-      ctx.beginPath(); ctx.moveTo(0, -r * 0.13); ctx.lineTo(L, 0); ctx.lineTo(0, r * 0.13); ctx.fill();
-      ctx.restore();
-    }
-    // flackernde Korona aus feinen Fäden
-    ctx.strokeStyle = `hsla(${hn(h + 15)},100%,82%,.22)`; ctx.lineWidth = 1.1;
-    ctx.beginPath();
-    const N = 64;
-    for (let i = 0; i < N; i++) {
-      const a = i / N * TAU + t * 0.03;
-      const n = 0.5 + 0.5 * Math.sin(i * 7.31 + t * (RM ? 0 : 1.9) + Math.sin(i * 3.7 + t * 0.8));
-      const r1 = r * 0.96, r2 = r * (1.06 + 0.42 * n * n);
-      ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
-    }
-    ctx.stroke();
-    ctx.restore();
-
-    // Kugel
-    g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.34, r * 0.05, x, y, r);
-    g.addColorStop(0, '#fff6ea');
-    g.addColorStop(0.24, `hsl(${h},95%,82%)`);
-    g.addColorStop(0.72, `hsl(${hn(h + sh * 12)},85%,64%)`);
-    g.addColorStop(1, `hsl(${hn(h + sh * 38)},75%,48%)`);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
-
-    // brodelnde Oberfläche (weiche Plasmazellen, auf die Kugel begrenzt)
-    ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.clip();
-    ctx.globalCompositeOperation = 'soft-light';
-    for (let k = 0; k < 7; k++) {
-      const a = t * (0.11 + k * 0.023) + k * 1.9;
-      const bx = x + Math.cos(a) * r * 0.5, by = y + Math.sin(a * 1.27 + k) * r * 0.45;
-      const br = r * (0.32 + 0.12 * Math.sin(t * 0.7 + k * 2.1));
-      const light = k % 2 ? 82 : 28;
-      const gg = ctx.createRadialGradient(bx, by, 0, bx, by, br);
-      gg.addColorStop(0, `hsla(${hn(h + sh * (k % 3) * 10)},100%,${light}%,.7)`); gg.addColorStop(1, 'hsla(0,0%,50%,0)');
-      ctx.fillStyle = gg; ctx.fillRect(bx - br, by - br, br * 2, br * 2);
-    }
-    // Randverdunkelung
-    ctx.globalCompositeOperation = 'source-over';
-    g = ctx.createRadialGradient(x, y, r * 0.55, x, y, r);
-    g.addColorStop(0, 'hsla(0,0%,0%,0)'); g.addColorStop(1, `hsla(${hn(h + sh * 45)},80%,22%,.5)`);
-    ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
-    // Glanzlicht
-    ctx.globalCompositeOperation = 'lighter';
-    g = ctx.createRadialGradient(x - r * 0.36, y - r * 0.42, 0, x - r * 0.36, y - r * 0.42, r * 0.55);
-    g.addColorStop(0, 'rgba(255,255,255,.3)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
-    ctx.restore();
-
-    // Randlicht
-    ctx.strokeStyle = `hsla(${hn(h - sh * 20)},100%,88%,.45)`; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(x, y, r - 0.75, 0, TAU); ctx.stroke();
+  function lum(r) {
+    if (r < RI) return 0;
+    return Math.min(1, (r - RI) / 0.03) * Math.pow(1 - (r - RI) / (1 - RI), 1.45);
   }
-
-  /* ---------- Umlaufbahnen ---------- */
-  function drawRings(t, front) {
-    const n = GENS.length, r0 = orb.r * 1.3, span = orb.ringMax - r0;
-    const cs = Math.cos(TILT), sn = Math.sin(TILT);
+  function paintTex(cnv, r0, r1, n, seed, mask) {
+    const c = cnv.getContext('2d'), h = TEX / 2, rnd = rng(seed);
+    c.clearRect(0, 0, TEX, TEX);
+    c.save(); c.translate(h, h);
+    const g = c.createRadialGradient(0, 0, 0, 0, 0, h);
+    for (let i = 0; i <= 24; i++) { const r = i / 24; g.addColorStop(r, `rgba(255,255,255,${(lum(r) * 0.8).toFixed(3)})`); }
+    c.fillStyle = g; c.fillRect(-h, -h, TEX, TEX);
+    // Schlieren, die sich leicht spiralförmig nach innen oder außen ziehen
+    c.lineCap = 'round'; c.lineJoin = 'round'; c.strokeStyle = '#fff';
     for (let i = 0; i < n; i++) {
-      const c = rings[i]; if (!c) continue;
-      const rx = r0 + span * i / (n - 1), ry = rx * 0.28, hue = GENS[i].hue;
-      // Bahnlinie: hintere Hälfte schwach, vordere etwas heller
-      ctx.globalAlpha = front ? 0.24 : 0.1; ctx.strokeStyle = `hsl(${hue},90%,78%)`; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.ellipse(orb.x, orb.y, rx, ry, TILT, front ? 0 : Math.PI, front ? Math.PI : TAU); ctx.stroke();
-      const k = Math.min(c, 12), sp = (RM ? 0.15 : 0.55) / (1 + i * 0.3);
-      const size0 = 1.7 + i * 0.22 + Math.min(1.2, Math.log10(c) * 0.5);
-      for (let j = 0; j < k; j++) {
-        const a = t * sp + j * TAU / k + i * 1.3;
-        if ((Math.sin(a) > 0) !== front) continue;
-        const depth = 0.75 + 0.35 * (Math.sin(a) + 1) / 2;
-        for (let tr = 2; tr >= 0; tr--) { // kurzer Schweif hinter jedem Körper
-          const aa = a - tr * 0.05, ex = Math.cos(aa) * rx, ey = Math.sin(aa) * ry;
-          const px = orb.x + ex * cs - ey * sn, py = orb.y + ex * sn + ey * cs;
-          const s = size0 * depth * (1 - tr * 0.25);
-          ctx.globalAlpha = (front ? 1 : 0.5) * (tr ? 0.18 / tr : 1);
-          if (!tr) { ctx.fillStyle = `hsla(${hue},100%,70%,.35)`; ctx.beginPath(); ctx.arc(px, py, s * 2.7, 0, TAU); ctx.fill(); }
-          ctx.fillStyle = `hsl(${hue},100%,${tr ? 75 : 88}%)`;
-          ctx.beginPath(); ctx.arc(px, py, s, 0, TAU); ctx.fill();
-        }
+      const r = r0 + (r1 - r0) * Math.pow(rnd(), 1.2);
+      const a0 = rnd() * TAU, span = 0.25 + rnd() * (2.2 - r), dr = (0.01 + rnd() * 0.05) * (rnd() < 0.5 ? 1 : -1);
+      c.globalAlpha = (0.12 + rnd() * 0.5) * (0.25 + lum(r));
+      c.lineWidth = (1.2 + rnd() * 5) * (1.25 - r);
+      c.beginPath();
+      for (let s = 0; s <= 10; s++) {
+        const a = a0 + span * s / 10, rr = (r + dr * s / 10) * h;
+        if (s) c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); else c.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
       }
+      c.stroke();
     }
-    ctx.globalAlpha = 1;
+    // heiße Klumpen
+    c.globalAlpha = 1;
+    for (let i = 0; i < n * 0.06; i++) {
+      const r = r0 + (r1 - r0) * rnd() * 0.75, a = rnd() * TAU, x = Math.cos(a) * r * h, y = Math.sin(a) * r * h, s = h * (0.02 + rnd() * 0.045);
+      const gg = c.createRadialGradient(x, y, 0, x, y, s);
+      gg.addColorStop(0, `rgba(255,255,255,${(0.55 * (0.3 + lum(r))).toFixed(3)})`); gg.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = gg; c.beginPath(); c.arc(x, y, s, 0, TAU); c.fill();
+    }
+    // dunkle Bahnen für Tiefe
+    c.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < n * 0.14; i++) {
+      const r = r0 + (r1 - r0) * rnd(), a = rnd() * TAU, span = 0.3 + rnd() * 1.4;
+      c.globalAlpha = 0.12 + rnd() * 0.3; c.lineWidth = 1.5 + rnd() * 5;
+      c.beginPath(); c.arc(0, 0, r * h, a, a + span); c.stroke();
+    }
+    c.globalAlpha = 1; c.globalCompositeOperation = 'destination-in';
+    const m = c.createRadialGradient(0, 0, 0, 0, 0, h);
+    mask.forEach(([p, a]) => m.addColorStop(p, `rgba(0,0,0,${a})`));
+    c.fillStyle = m; c.fillRect(-h, -h, TEX, TEX);
+    c.restore();
+    c.globalCompositeOperation = 'source-over';
+  }
+  paintTex(texIn, RI, 0.68, 520, 11, [[0, 1], [0.6, 1], [0.68, 0], [1, 0]]);
+  paintTex(texOut, 0.6, 1.0, 520, 23, [[0, 0], [0.6, 0], [0.68, 1], [0.88, 1], [1, 0]]);
+
+  function composeDisk() {
+    const w = work.width, h = w / 2, c = wctx, H0 = hole.hue, S0 = hole.sat, hot = hole.rausch;
+    c.setTransform(1, 0, 0, 1, h, h);
+    c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+    c.clearRect(-h, -h, w, w);
+    c.rotate(-hole.spin); c.drawImage(texIn, -h, -h, w, w);
+    c.setTransform(1, 0, 0, 1, h, h);
+    c.rotate(-hole.spin * 0.52 + 1.7); c.drawImage(texOut, -h, -h, w, w);
+    c.setTransform(1, 0, 0, 1, h, h);
+    // einfärben: innen fast weiß, außen tief gefärbt
+    c.globalCompositeOperation = 'source-atop';
+    const L = 60 + hot * 10;
+    const g = c.createRadialGradient(0, 0, h * RI, 0, 0, h);
+    g.addColorStop(0, `hsl(${hn(H0 + 28)},${S0}%,96%)`);
+    g.addColorStop(0.1, `hsl(${hn(H0 + 16)},${S0}%,${80 + hot * 8}%)`);
+    g.addColorStop(0.35, `hsl(${hn(H0)},${S0}%,${L}%)`);
+    g.addColorStop(0.7, `hsl(${hn(H0 - 14)},${S0 * 0.95}%,${L - 16}%)`);
+    g.addColorStop(1, `hsl(${hn(H0 - 28)},${S0 * 0.9}%,${L - 30}%)`);
+    c.fillStyle = g; c.fillRect(-h, -h, w, w);
+    // Doppler: links kommt die Scheibe auf uns zu (heller, weißer), rechts entfernt sie sich
+    c.globalCompositeOperation = 'destination-out';
+    const d = c.createLinearGradient(-h, 0, h, 0);
+    d.addColorStop(0, 'rgba(0,0,0,0)'); d.addColorStop(0.5, 'rgba(0,0,0,.2)'); d.addColorStop(1, 'rgba(0,0,0,.62)');
+    c.fillStyle = d; c.fillRect(-h, -h, w, w);
+    c.globalCompositeOperation = 'source-atop';
+    const l = c.createLinearGradient(-h, 0, h * 0.1, 0);
+    l.addColorStop(0, 'rgba(255,252,245,.38)'); l.addColorStop(1, 'rgba(255,252,245,0)');
+    c.fillStyle = l; c.fillRect(-h, -h, w, w);
+    c.globalCompositeOperation = 'source-over';
   }
 
-  function star4(c, x, y, s) { // vierzackiger Funkel
+  function diskHalf(R, front, alpha) {
+    const ro = R * 1.155 / RI, c = ctx;
+    c.save();
+    c.translate(hole.x, hole.y); c.rotate(hole.roll); c.scale(1, hole.k);
+    c.beginPath();
+    if (front) c.rect(-ro - 2, 0, ro * 2 + 4, ro + 2); else c.rect(-ro - 2, -ro - 2, ro * 2 + 4, ro + 2);
+    c.clip();
+    c.globalCompositeOperation = 'lighter'; c.globalAlpha = alpha;
+    c.drawImage(work, -ro, -ro, ro * 2, ro * 2);
+    c.restore();
+  }
+
+  // Lichtbogen: das Bild der hinteren Scheibe, von der Schwerkraft um den Schatten gebogen
+  function drawHalo(R, alpha) {
+    const S = Math.max(4, Math.ceil(R * 3.7 * DPR));
+    if (halo.width !== S) { halo.width = S; halo.height = S; }
+    const c = hctx, h = S / 2, r = R * DPR, outer = r / RI;
+    c.setTransform(1, 0, 0, 1, h, h);
+    c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+    c.clearRect(-h, -h, S, S);
+    c.rotate(-0.25);
+    c.drawImage(work, -outer, -outer, outer * 2, outer * 2);
+    c.setTransform(1, 0, 0, 1, h, h);
+    c.globalCompositeOperation = 'destination-in';
+    const g = c.createRadialGradient(0, 0, r * 0.98, 0, 0, r * 1.8);
+    g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.3, 'rgba(0,0,0,.95)'); g.addColorStop(0.62, 'rgba(0,0,0,.42)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.fillRect(-h, -h, S, S);
+    // oben (Bild der hinteren Scheibe) kräftig, unten schwächer
+    const v = c.createLinearGradient(0, -r * 1.8, 0, r * 1.8);
+    v.addColorStop(0, 'rgba(0,0,0,1)'); v.addColorStop(0.5, 'rgba(0,0,0,.72)'); v.addColorStop(1, 'rgba(0,0,0,.36)');
+    c.fillStyle = v; c.fillRect(-h, -h, S, S);
+    c.globalCompositeOperation = 'source-over';
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = alpha;
+    ctx.drawImage(halo, hole.x - h / DPR, hole.y - h / DPR, S / DPR, S / DPR);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  }
+
+  function passes(f, total) { for (let k = 0; total > 0.02 && k < 4; k++, total -= 1) f(Math.min(1, total)); }
+  // weicher Schein entlang der Scheibenebene – lässt das Gas leuchten
+  function diskGlow(R, a) {
+    const ro = R * 1.155 / RI * 1.2;
+    ctx.save(); ctx.translate(hole.x, hole.y); ctx.rotate(hole.roll); ctx.scale(1, hole.k * 1.8);
+    const g = ctx.createRadialGradient(0, 0, R * 0.8, 0, 0, ro);
+    g.addColorStop(0, `hsla(${hn(hole.hue + 10)},${hole.sat}%,70%,${(0.32 * a).toFixed(3)})`);
+    g.addColorStop(0.5, `hsla(${hn(hole.hue)},${hole.sat}%,55%,${(0.12 * a).toFixed(3)})`);
+    g.addColorStop(1, 'hsla(0,0%,0%,0)');
+    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, ro, 0, TAU); ctx.fill();
+    ctx.restore(); ctx.globalCompositeOperation = 'source-over';
+  }
+  function drawGlow(R) {
+    const x = hole.x, y = hole.y, S0 = hole.sat;
+    const a = 0.2 + 0.16 * hole.rausch + 0.22 * Math.min(1, hole.feed);
+    const g = ctx.createRadialGradient(x, y, R * 0.9, x, y, R * 5);
+    g.addColorStop(0, `hsla(${hn(hole.hue)},${S0}%,60%,${a})`);
+    g.addColorStop(0.35, `hsla(${hn(hole.hue - 20)},${S0}%,50%,${a * 0.35})`);
+    g.addColorStop(1, 'hsla(0,0%,0%,0)');
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R * 5, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawShadow(R) {
+    const x = hole.x, y = hole.y, f = Math.min(1, hole.feed), S0 = hole.sat;
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill();
+    // Photonenring
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineWidth = Math.max(1, R * 0.03);
+    ctx.strokeStyle = `hsla(${hn(hole.hue + 25)},${S0}%,90%,${0.6 + 0.35 * f})`;
+    ctx.beginPath(); ctx.arc(x, y, R * 1.015, 0, TAU); ctx.stroke();
+    ctx.lineWidth = R * 0.12;
+    ctx.strokeStyle = `hsla(${hn(hole.hue)},${S0}%,70%,${0.1 + 0.2 * f})`;
+    ctx.beginPath(); ctx.arc(x, y, R * 1.07, 0, TAU); ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // Relativistische Jets aus den Polen (Fähigkeit „Jet“, ab Stufe „Quasar“ dauerhaft schwach)
+  function drawJets(R, a) {
+    if (a < 0.02) return;
+    ctx.save(); ctx.translate(hole.x, hole.y); ctx.rotate(hole.roll); ctx.globalCompositeOperation = 'lighter';
+    for (const dir of [-1, 1]) {
+      const room = dir < 0 ? hole.y - hole.top + 20 : hole.bottom - hole.y + 20;
+      const L = Math.min(room, R * 6) * (0.88 + 0.12 * Math.sin(clock * 9 + dir * 2)), y0 = dir * R * 1.02;
+      // weicher Strahl aus überlappenden Lichtflecken
+      for (let k = 0; k < 12; k++) {
+        const f = k / 11, y = y0 + dir * (L - R) * f, w = R * (0.3 - 0.2 * f);
+        const g = ctx.createRadialGradient(0, y, 0, 0, y, w);
+        g.addColorStop(0, `hsla(205,100%,85%,${(0.45 * a * (1 - f * 0.8)).toFixed(3)})`); g.addColorStop(1, 'hsla(220,100%,60%,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, y, w, 0, TAU); ctx.fill();
+      }
+      // heller Kern
+      const g = ctx.createLinearGradient(0, y0, 0, dir * L);
+      g.addColorStop(0, `rgba(255,255,255,${(0.95 * a).toFixed(3)})`); g.addColorStop(0.4, `hsla(200,100%,80%,${(0.55 * a).toFixed(3)})`); g.addColorStop(1, 'hsla(220,100%,70%,0)');
+      ctx.strokeStyle = g; ctx.lineCap = 'round'; ctx.lineWidth = Math.max(2, R * 0.085);
+      ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(0, dir * L); ctx.stroke();
+      // Knoten, die den Strahl entlangschießen
+      for (let k = 0; k < 3; k++) {
+        const p = (clock * 1.6 + k / 3) % 1, y = y0 + dir * (L - R) * p, s = R * 0.1 * (1 - p);
+        ctx.globalAlpha = a * (1 - p) * 0.9;
+        ctx.fillStyle = '#eaf6ff'; ctx.beginPath(); ctx.arc(0, y, s + 0.6, 0, TAU); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  /* ---------- Sprites: Himmelskörper, Beute & Großbeute ---------- */
+  const sprCache = new Map();
+  const ball = (g, r, stops, lx = -0.35, ly = -0.4) => {
+    const gr = g.createRadialGradient(r * lx, r * ly, r * 0.05, 0, 0, r);
+    stops.forEach(([o, col]) => gr.addColorStop(o, col));
+    g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill();
+  };
+  const glow = (g, r, col) => {
+    const gr = g.createRadialGradient(0, 0, 0, 0, 0, r);
+    gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill();
+  };
+  function blobPath(g, r, rnd, n = 9, j = 0.28) {
+    const p = [];
+    for (let i = 0; i < n; i++) { const a = i / n * TAU, rr = r * (1 - j + rnd() * j); p.push([Math.cos(a) * rr, Math.sin(a) * rr]); }
+    g.beginPath();
+    const z = p[n - 1]; g.moveTo((z[0] + p[0][0]) / 2, (z[1] + p[0][1]) / 2);
+    for (let i = 0; i < n; i++) { const a = p[i], b = p[(i + 1) % n]; g.quadraticCurveTo(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2); }
+    g.closePath();
+  }
+  function star4(c, x, y, s) {
     const q = s * 0.22;
     c.beginPath(); c.moveTo(x, y - s); c.lineTo(x + q, y - q); c.lineTo(x + s, y); c.lineTo(x + q, y + q);
     c.lineTo(x, y + s); c.lineTo(x - q, y + q); c.lineTo(x - s, y); c.lineTo(x - q, y - q); c.closePath(); c.fill();
   }
+  function shade(g, B, a = 0.75) { // Nachtseite unten rechts
+    const sh = g.createLinearGradient(-B * 0.7, -B * 0.7, B, B);
+    sh.addColorStop(0.42, 'rgba(0,0,0,0)'); sh.addColorStop(1, `rgba(0,2,16,${a})`);
+    g.fillStyle = sh; g.fillRect(-B, -B, B * 2, B * 2);
+  }
+  function rockLike(g, B, rnd, cols, warm) {
+    blobPath(g, B, rnd, 9, 0.3);
+    const gr = g.createRadialGradient(-B * 0.35, -B * 0.4, B * 0.1, 0, 0, B * 1.05);
+    gr.addColorStop(0, cols[0]); gr.addColorStop(0.45, cols[1]); gr.addColorStop(1, cols[2]);
+    g.fillStyle = gr; g.fill();
+    g.save(); g.clip();
+    for (let i = 0; i < 5; i++) {
+      const x = (rnd() - 0.5) * B * 1.2, y = (rnd() - 0.5) * B * 1.2, r = B * (0.08 + rnd() * 0.16);
+      g.fillStyle = 'rgba(30,24,22,.38)'; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+      g.strokeStyle = 'rgba(255,245,230,.2)'; g.lineWidth = B * 0.035;
+      g.beginPath(); g.arc(x - r * 0.15, y - r * 0.15, r, Math.PI * 0.9, Math.PI * 1.7); g.stroke();
+    }
+    // Licht der Scheibe von unten rechts
+    const rl = g.createRadialGradient(B * 0.75, B * 0.75, 0, B * 0.75, B * 0.75, B * 1.3);
+    rl.addColorStop(0, warm); rl.addColorStop(1, 'rgba(0,0,0,0)');
+    g.globalCompositeOperation = 'lighter'; g.fillStyle = rl; g.fillRect(-B * 1.3, -B * 1.3, B * 2.6, B * 2.6);
+    g.restore();
+  }
+  function pill(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.arc(x + w - r, y + r, r, -Math.PI / 2, Math.PI / 2);
+    g.lineTo(x + r, y + h); g.arc(x + r, y + r, r, Math.PI / 2, Math.PI * 1.5); g.closePath();
+  }
+  const beams = (c, x, y, size, t, a, k = 1) => { // rotierende Leuchtkegel (Neutronenstern)
+    const L = size * 2.4 * k;
+    c.save(); c.translate(x, y); c.rotate(t * 3.2); c.globalCompositeOperation = 'lighter'; c.globalAlpha = 0.55 * a;
+    const gr = c.createLinearGradient(0, -L, 0, L);
+    gr.addColorStop(0, 'rgba(160,230,255,0)'); gr.addColorStop(0.5, 'rgba(225,250,255,.95)'); gr.addColorStop(1, 'rgba(160,230,255,0)');
+    c.fillStyle = gr;
+    c.beginPath(); c.moveTo(-size * 0.14, 0); c.lineTo(-size * 0.05, -L); c.lineTo(size * 0.05, -L); c.lineTo(size * 0.14, 0);
+    c.lineTo(size * 0.05, L); c.lineTo(-size * 0.05, L); c.closePath(); c.fill();
+    c.restore();
+  };
+
+  const SPRITES = {
+    rock: { pad: 1.15, spin: true, paint: (g, B, rnd) => rockLike(g, B, rnd, ['#d8c8b6', '#8a776a', '#352c27'], 'rgba(255,150,70,.42)') },
+    ice: { pad: 1.15, spin: true, paint(g, B, rnd) {
+      rockLike(g, B, rnd, ['#f4fcff', '#93c4e6', '#2f5a80'], 'rgba(255,170,110,.32)');
+      g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(-B * 0.32, -B * 0.36, B * 0.1, 0, TAU); g.fill();
+    } },
+    gas: { pad: 1.5, paint(g, B, rnd) {
+      g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 8; i++) {
+        const x = (rnd() - 0.5) * B * 1.1, y = (rnd() - 0.5) * B * 0.8, r = B * (0.45 + rnd() * 0.45), h = 190 + rnd() * 45;
+        const gr = g.createRadialGradient(x, y, 0, x, y, r);
+        gr.addColorStop(0, `hsla(${h},85%,80%,.4)`); gr.addColorStop(1, 'hsla(0,0%,0%,0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+      }
+    } },
+    comet: { pad: 2.4, spin: true, paint(g, B, rnd) {
+      glow(g, B * 2.3, 'rgba(150,220,255,.5)');
+      blobPath(g, B * 0.78, rnd, 8, 0.25);
+      const gr = g.createRadialGradient(-B * 0.25, -B * 0.3, 0, 0, 0, B * 0.8);
+      gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.5, '#cdeeff'); gr.addColorStop(1, '#5f9cc0');
+      g.fillStyle = gr; g.fill();
+    } },
+    moon: { pad: 1.1, spin: true, paint(g, B, rnd) {
+      ball(g, B, [[0, '#f2efe6'], [0.55, '#b0aa9e'], [1, '#56514a']]);
+      g.save(); g.beginPath(); g.arc(0, 0, B, 0, TAU); g.clip();
+      for (let i = 0; i < 9; i++) {
+        const a = rnd() * TAU, d = rnd() * B * 0.8, x = Math.cos(a) * d, y = Math.sin(a) * d, r = B * (0.07 + rnd() * 0.17);
+        g.fillStyle = 'rgba(70,64,58,.35)'; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+        g.fillStyle = 'rgba(255,255,255,.12)'; g.beginPath(); g.arc(x - r * 0.25, y - r * 0.25, r * 0.7, 0, TAU); g.fill();
+      }
+      shade(g, B, 0.72); g.restore();
+    } },
+    planet: { pad: 1.3, paint(g, B, rnd) {
+      glow(g, B * 1.3, 'rgba(120,190,255,.45)');
+      ball(g, B, [[0, '#a6dcff'], [0.5, '#2f7fd6'], [1, '#0d2a63']]);
+      g.save(); g.beginPath(); g.arc(0, 0, B, 0, TAU); g.clip();
+      for (let i = 0; i < 6; i++) {
+        g.save(); g.translate((rnd() - 0.5) * B * 1.6, (rnd() - 0.5) * B * 1.4);
+        g.fillStyle = rnd() < 0.6 ? 'rgba(88,168,96,.92)' : 'rgba(200,172,112,.88)';
+        blobPath(g, B * (0.18 + rnd() * 0.25), rnd, 7, 0.45); g.fill(); g.restore();
+      }
+      g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineCap = 'round';
+      for (let i = 0; i < 6; i++) {
+        const y = (rnd() - 0.5) * B * 1.6, x = (rnd() - 0.5) * B;
+        g.lineWidth = B * (0.05 + rnd() * 0.07);
+        g.beginPath(); g.moveTo(x - B * 0.5, y); g.quadraticCurveTo(x, y - B * 0.12, x + B * 0.5, y + B * 0.05); g.stroke();
+      }
+      shade(g, B, 0.8); g.restore();
+      g.strokeStyle = 'rgba(160,220,255,.6)'; g.lineWidth = B * 0.06;
+      g.beginPath(); g.arc(0, 0, B * 0.98, Math.PI * 0.75, Math.PI * 1.75); g.stroke();
+    } },
+    giant: { pad: 1.9, paint(g, B, rnd) {
+      const ring = front => {
+        g.save(); g.rotate(-0.35); g.scale(1, 0.3);
+        const rg = g.createRadialGradient(0, 0, B * 1.2, 0, 0, B * 1.85);
+        rg.addColorStop(0, 'rgba(240,215,170,0)'); rg.addColorStop(0.2, 'rgba(240,215,170,.8)'); rg.addColorStop(0.65, 'rgba(200,165,125,.5)'); rg.addColorStop(1, 'rgba(200,165,125,0)');
+        g.fillStyle = rg; g.beginPath();
+        if (front) { g.arc(0, 0, B * 1.85, 0, Math.PI); g.arc(0, 0, B * 1.2, Math.PI, 0, true); }
+        else { g.arc(0, 0, B * 1.85, Math.PI, TAU); g.arc(0, 0, B * 1.2, TAU, Math.PI, true); }
+        g.closePath(); g.fill(); g.restore();
+      };
+      ring(false);
+      ball(g, B, [[0, '#ffe2b5'], [0.6, '#cf8d50'], [1, '#62341a']]);
+      g.save(); g.beginPath(); g.arc(0, 0, B, 0, TAU); g.clip(); g.rotate(-0.35);
+      for (let i = -6; i <= 6; i++) {
+        g.fillStyle = `rgba(${120 + rnd() * 100 | 0},${70 + rnd() * 60 | 0},${30 + rnd() * 30 | 0},${(0.22 + rnd() * 0.3).toFixed(2)})`;
+        g.fillRect(-B * 1.3, i * B * 0.17, B * 2.6, B * (0.06 + rnd() * 0.08));
+      }
+      g.rotate(0.35); shade(g, B, 0.7); g.restore();
+      ring(true);
+    } },
+    star: { pad: 2.6, paint(g, B) {
+      glow(g, B * 2.6, 'rgba(255,195,90,.5)'); glow(g, B * 1.5, 'rgba(255,232,165,.8)');
+      ball(g, B, [[0, '#ffffff'], [0.4, '#fff1b8'], [1, '#ffb347']], -0.2, -0.2);
+    } },
+    neutron: { pad: 3.2, paint(g, B) {
+      glow(g, B * 3.2, 'rgba(110,200,255,.45)'); glow(g, B * 1.4, 'rgba(200,240,255,.9)');
+      ball(g, B * 0.7, [[0, '#ffffff'], [1, '#9fe0ff']], 0, 0);
+    }, post: (c, x, y, s, t, a) => beams(c, x, y, s, t, a) },
+    nebula: { pad: 1.3, paint(g, B, rnd) {
+      g.globalCompositeOperation = 'lighter';
+      const hs = [300, 330, 262, 205];
+      for (let i = 0; i < 9; i++) {
+        const x = (rnd() - 0.5) * B * 1.3, y = (rnd() - 0.5) * B, r = B * (0.35 + rnd() * 0.5), h = hs[i % 4] + rnd() * 20;
+        const gr = g.createRadialGradient(x, y, 0, x, y, r);
+        gr.addColorStop(0, `hsla(${h},90%,70%,.38)`); gr.addColorStop(1, 'hsla(0,0%,0%,0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+      }
+      g.fillStyle = 'rgba(255,255,255,.85)';
+      for (let i = 0; i < 12; i++) { g.beginPath(); g.arc((rnd() - 0.5) * B * 1.2, (rnd() - 0.5) * B * 0.9, B * (0.02 + rnd() * 0.03), 0, TAU); g.fill(); }
+    } },
+    cluster: { pad: 1.5, paint(g, B, rnd) {
+      glow(g, B * 1.4, 'rgba(255,220,255,.3)');
+      g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 26; i++) {
+        const a = rnd() * TAU, d = Math.pow(rnd(), 1.6) * B, x = Math.cos(a) * d, y = Math.sin(a) * d, r = B * (0.04 + rnd() * 0.07);
+        const col = rnd() < 0.3 ? '255,210,170' : rnd() < 0.5 ? '200,220,255' : '255,255,255';
+        const gr = g.createRadialGradient(x, y, 0, x, y, r * 3);
+        gr.addColorStop(0, `rgba(${col},1)`); gr.addColorStop(0.3, `rgba(${col},.6)`); gr.addColorStop(1, `rgba(${col},0)`);
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, r * 3, 0, TAU); g.fill();
+      }
+    } },
+    galaxy: { pad: 1.25, spin: true, paint(g, B, rnd) {
+      g.save(); g.scale(1, 0.62); g.globalCompositeOperation = 'lighter';
+      glow(g, B * 1.15, 'rgba(170,150,255,.32)');
+      for (let arm = 0; arm < 2; arm++) for (let i = 0; i < 90; i++) {
+        const f = i / 90, a = arm * Math.PI + f * 4.2, d = B * (0.12 + f * 0.95);
+        const x = Math.cos(a) * d + (rnd() - 0.5) * B * 0.12, y = Math.sin(a) * d + (rnd() - 0.5) * B * 0.12, r = B * (0.05 + (1 - f) * 0.06);
+        const gr = g.createRadialGradient(x, y, 0, x, y, r * 2);
+        gr.addColorStop(0, `rgba(${200 + (1 - f) * 55 | 0},${200 + (1 - f) * 40 | 0},255,${(0.55 * (1 - f * 0.7)).toFixed(2)})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, r * 2, 0, TAU); g.fill();
+      }
+      glow(g, B * 0.45, 'rgba(255,230,180,.95)');
+      g.restore();
+    } },
+    web: { pad: 1.25, paint(g, B, rnd) {
+      const nodes = [[0, 0]];
+      for (let i = 0; i < 8; i++) { const a = i / 8 * TAU + rnd() * 0.5, d = B * (0.3 + rnd() * 0.65); nodes.push([Math.cos(a) * d, Math.sin(a) * d]); }
+      g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+      for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+        const [x1, y1] = nodes[i], [x2, y2] = nodes[j];
+        if (Math.hypot(x2 - x1, y2 - y1) > B * 1.0) continue;
+        g.strokeStyle = 'rgba(120,230,255,.35)'; g.lineWidth = B * 0.05;
+        g.beginPath(); g.moveTo(x1, y1); g.quadraticCurveTo((x1 + x2) / 2 + (rnd() - 0.5) * B * 0.3, (y1 + y2) / 2 + (rnd() - 0.5) * B * 0.3, x2, y2); g.stroke();
+      }
+      for (const [x, y] of nodes) {
+        const gr = g.createRadialGradient(x, y, 0, x, y, B * 0.22);
+        gr.addColorStop(0, 'rgba(225,250,255,.95)'); gr.addColorStop(1, 'rgba(120,220,255,0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, B * 0.22, 0, TAU); g.fill();
+      }
+    } },
+    sat: { pad: 1.2, spin: true, paint(g, B) {
+      const panel = x => {
+        g.fillStyle = '#1b3f8f'; g.fillRect(x, -B * 0.28, B * 0.72, B * 0.56);
+        g.strokeStyle = 'rgba(160,200,255,.75)'; g.lineWidth = B * 0.035;
+        for (let i = 1; i < 4; i++) { g.beginPath(); g.moveTo(x + i * B * 0.18, -B * 0.28); g.lineTo(x + i * B * 0.18, B * 0.28); g.stroke(); }
+        g.strokeRect(x, -B * 0.28, B * 0.72, B * 0.56);
+      };
+      panel(-B); panel(B * 0.28);
+      const gr = g.createLinearGradient(-B * 0.3, -B * 0.32, B * 0.3, B * 0.32);
+      gr.addColorStop(0, '#ffe7a0'); gr.addColorStop(0.5, '#c99a3c'); gr.addColorStop(1, '#6e4c14');
+      g.fillStyle = gr; g.fillRect(-B * 0.3, -B * 0.32, B * 0.6, B * 0.64);
+      g.strokeStyle = '#e8e8e8'; g.lineWidth = B * 0.05;
+      g.beginPath(); g.moveTo(0, -B * 0.32); g.lineTo(0, -B * 0.62); g.stroke();
+      g.fillStyle = '#fff'; g.beginPath(); g.arc(0, -B * 0.66, B * 0.08, 0, TAU); g.fill();
+    } },
+    capsule: { pad: 1.9, spin: true, paint(g, B, rnd, v) {
+      const hue = [215, 195, 285, 42][v] ?? 215, sat = [35, 95, 95, 100][v] ?? 35;
+      glow(g, B * 1.85, `hsla(${hue},${sat}%,62%,.65)`);
+      g.save(); g.rotate(-0.45);
+      const w = B * 1.15, h = B * 0.66;
+      pill(g, -w, -h, w * 2, h * 2, h);
+      const gr = g.createLinearGradient(0, -h, 0, h);
+      gr.addColorStop(0, '#f7f8fc'); gr.addColorStop(0.45, '#a4acc0'); gr.addColorStop(1, '#3f465a');
+      g.fillStyle = gr; g.fill();
+      g.save(); g.clip();
+      g.globalCompositeOperation = 'lighter';
+      const band = g.createLinearGradient(-B * 0.3, 0, B * 0.3, 0);
+      band.addColorStop(0, `hsla(${hue},${sat}%,60%,0)`); band.addColorStop(0.5, `hsla(${hue},${sat}%,72%,1)`); band.addColorStop(1, `hsla(${hue},${sat}%,60%,0)`);
+      g.fillStyle = band; g.fillRect(-B * 0.3, -h, B * 0.6, h * 2);
+      g.restore();
+      g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = B * 0.06; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(-w + h * 0.7, -h * 0.55); g.lineTo(w - h * 0.7, -h * 0.55); g.stroke();
+      g.restore();
+    } },
+    gold: { pad: 2.6, paint(g, B) {
+      glow(g, B * 2.6, 'rgba(255,195,80,.6)'); glow(g, B * 1.3, 'rgba(255,240,190,.95)');
+      ball(g, B * 0.62, [[0, '#ffffff'], [1, '#ffd36b']], -0.2, -0.2);
+      g.fillStyle = 'rgba(255,255,255,.9)'; star4(g, 0, 0, B * 1.9);
+    } },
+    bcomet: { pad: 1.7, spin: true, paint(g, B, rnd) {
+      glow(g, B * 1.7, 'rgba(140,210,255,.42)');
+      rockLike(g, B, rnd, ['#f6fdff', '#9ccbe8', '#2c5679'], 'rgba(255,170,110,.3)');
+      g.strokeStyle = 'rgba(20,40,70,.45)'; g.lineWidth = B * 0.04;
+      for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo((rnd() - 0.5) * B, (rnd() - 0.5) * B); g.lineTo((rnd() - 0.5) * B, (rnd() - 0.5) * B); g.stroke(); }
+    } },
+    bplanet: { pad: 1.4, spin: true, paint(g, B, rnd) {
+      glow(g, B * 1.4, 'rgba(120,140,255,.35)');
+      ball(g, B, [[0, '#a3b1dc'], [0.55, '#4a5a8f'], [1, '#121834']]);
+      g.save(); g.beginPath(); g.arc(0, 0, B, 0, TAU); g.clip();
+      g.globalCompositeOperation = 'lighter'; g.strokeStyle = 'rgba(120,240,255,.75)'; g.lineCap = 'round';
+      for (let i = 0; i < 7; i++) {
+        let x = (rnd() - 0.5) * B * 1.4, y = (rnd() - 0.5) * B * 1.4;
+        g.lineWidth = B * (0.03 + rnd() * 0.03); g.beginPath(); g.moveTo(x, y);
+        for (let k = 0; k < 4; k++) { x += (rnd() - 0.5) * B * 0.5; y += (rnd() - 0.5) * B * 0.5; g.lineTo(x, y); }
+        g.stroke();
+      }
+      g.globalCompositeOperation = 'source-over'; shade(g, B, 0.75); g.restore();
+    } },
+    bdwarf: { pad: 1.7, spin: true, paint(g, B, rnd) {
+      glow(g, B * 1.7, 'rgba(255,90,60,.4)');
+      ball(g, B, [[0, '#f0956a'], [0.6, '#8a3a2a'], [1, '#26090c']]);
+      g.save(); g.beginPath(); g.arc(0, 0, B, 0, TAU); g.clip();
+      for (let i = -6; i <= 6; i++) { g.fillStyle = `rgba(${90 + rnd() * 80 | 0},${20 + rnd() * 30 | 0},${15 + rnd() * 20 | 0},.35)`; g.fillRect(-B, i * B * 0.17, B * 2, B * (0.05 + rnd() * 0.07)); }
+      shade(g, B, 0.6); g.restore();
+    } },
+    mini: { pad: 2.4, paint(g, B) { // kleines rivalisierendes Schwarzes Loch
+      glow(g, B * 2.4, 'rgba(190,90,255,.45)');
+      g.save(); g.rotate(0.3); g.scale(1, 0.3);
+      const rg = g.createRadialGradient(0, 0, B * 1.1, 0, 0, B * 2.4);
+      rg.addColorStop(0, 'rgba(255,225,255,.95)'); rg.addColorStop(0.3, 'rgba(230,110,255,.75)'); rg.addColorStop(1, 'rgba(120,40,200,0)');
+      g.fillStyle = rg; g.beginPath(); g.arc(0, 0, B * 2.4, 0, TAU); g.arc(0, 0, B * 1.05, 0, TAU, true); g.fill();
+      g.restore();
+      g.fillStyle = '#000'; g.beginPath(); g.arc(0, 0, B, 0, TAU); g.fill();
+      g.strokeStyle = 'rgba(255,200,255,.85)'; g.lineWidth = B * 0.06; g.beginPath(); g.arc(0, 0, B * 1.03, 0, TAU); g.stroke();
+    } },
+    bneutron: { pad: 3, paint(g, B) {
+      glow(g, B * 3, 'rgba(110,200,255,.5)'); glow(g, B * 1.5, 'rgba(210,245,255,.9)');
+      ball(g, B * 0.75, [[0, '#ffffff'], [1, '#a6e4ff']], 0, 0);
+    }, post: (c, x, y, s, t, a) => beams(c, x, y, s, t, a, 1.4) },
+  };
+
+  // B = Radius des Körpers in Bildpunkten der Vorlage (64 reicht im Spiel, größer für Dialoge)
+  function sprite(kind, v = 0, B = 64) {
+    const key = kind + ':' + v + ':' + B;
+    let s = sprCache.get(key);
+    if (!s) {
+      const def = SPRITES[kind] || SPRITES.rock, size = Math.ceil(B * 2 * def.pad);
+      const c = mk(size, size), g = c.getContext('2d');
+      g.translate(size / 2, size / 2);
+      def.paint(g, B, rng(v * 7919 + kind.length * 104729 + kind.charCodeAt(0) * 31 + 1), v);
+      s = { cv: c, pad: def.pad, spin: !!def.spin, post: def.post || null };
+      sprCache.set(key, s);
+    }
+    return s;
+  }
+  // size = Durchmesser des Körpers in CSS-Pixeln
+  function drawSprite(c, kind, x, y, size, rot, v = 0, alpha = 1) {
+    const s = sprite(kind, v), d = size * s.pad;
+    c.globalAlpha = alpha;
+    if (s.spin && rot) { c.save(); c.translate(x, y); c.rotate(rot); c.drawImage(s.cv, -d / 2, -d / 2, d, d); c.restore(); }
+    else c.drawImage(s.cv, x - d / 2, y - d / 2, d, d);
+    if (s.post) s.post(c, x, y, size, clock, alpha);
+    c.globalAlpha = 1;
+  }
+
+  /* ---------- Orbit: gekaufte Himmelskörper kreisen auf verschieden geneigten Bahnen ---------- */
+  const ORB = GENS.map((g, i) => ({
+    tilt: [-0.30, 0.20, -0.12, 0.30, -0.22, 0.08, 0.26, -0.27, 0.13, -0.05, 0.22, -0.17][i] ?? 0,
+    fl: [0.22, 0.30, 0.25, 0.34, 0.22, 0.30, 0.26, 0.36, 0.22, 0.32, 0.25, 0.30][i] ?? 0.28,
+    rf: 0.6 + 0.4 * i / Math.max(1, GENS.length - 1),
+    sp: 0.55 / (1 + i * 0.2),
+    ph: i * 1.7,
+    size: [12, 17, 10, 13, 15, 20, 14, 10, 23, 20, 22, 23][i] ?? 15,
+  }));
+  let counts = GENS.map(() => 0), prods = GENS.map(() => 0);
+  const P = { x: 0, y: 0, z: 0 };
+  const visN = c => c > 0 ? Math.min(6, 1 + Math.floor(Math.log2(c))) : 0;
+  function orbitPos(i, j, n) {
+    const o = ORB[i], rx = hole.orbitR * o.rf, ry = rx * o.fl;
+    const a = clock * o.sp + j * TAU / n + o.ph;
+    const ex = Math.cos(a) * rx, ey = Math.sin(a) * ry, cs = Math.cos(o.tilt), sn = Math.sin(o.tilt);
+    P.x = hole.x + ex * cs - ey * sn; P.y = hole.y + ex * sn + ey * cs; P.z = Math.sin(a);
+    return P;
+  }
+  function drawOrbitLines() {
+    ctx.lineWidth = 1;
+    for (let i = 0; i < GENS.length; i++) {
+      if (!counts[i]) continue;
+      const o = ORB[i], rx = hole.orbitR * o.rf;
+      ctx.strokeStyle = `hsla(${GENS[i].hue},80%,75%,.06)`;
+      ctx.beginPath(); ctx.ellipse(hole.x, hole.y, rx, rx * o.fl, o.tilt, 0, TAU); ctx.stroke();
+    }
+  }
+  function drawOrbit(front) {
+    for (let i = 0; i < GENS.length; i++) {
+      const n = visN(counts[i]); if (!n) continue;
+      for (let j = 0; j < n; j++) {
+        orbitPos(i, j, n);
+        if ((P.z > 0) !== front) continue;
+        const d = (P.z + 1) / 2;
+        drawSprite(ctx, GENS[i].spr, P.x, P.y, ORB[i].size * (0.7 + 0.4 * d), clock * 0.6 + j * 2 + i, j % 3, front ? 1 : 0.4 + 0.45 * d);
+      }
+    }
+  }
+
+  /* ---------- Materieströme: Teilchen spiralen in der Scheibenebene ins Loch ---------- */
+  const spir = [];
+  function addSpiral(x, y, hue, size, sp) {
+    if (spir.length > 240) return;
+    const dx = x - hole.x, dy = y - hole.y, cr = Math.cos(hole.roll), sr = Math.sin(hole.roll), fl = hole.k * 1.45;
+    const u = dx * cr + dy * sr, v = (-dx * sr + dy * cr) / fl;
+    spir.push({ r: Math.hypot(u, v), th: Math.atan2(v, u), hue: hn(hue), size, sp, x, y, px: x, py: y, age: 0, front: v > 0 });
+  }
+  function updateSpirals(dt) {
+    const R = hole.R, cr = Math.cos(hole.roll), sr = Math.sin(hole.roll), fl = hole.k * 1.45;
+    for (let i = spir.length - 1; i >= 0; i--) {
+      const p = spir[i], q = R / Math.max(p.r, 1), q15 = q * Math.sqrt(q);
+      p.age += dt;
+      p.r -= dt * p.sp * (18 + 260 * q15);
+      p.th -= dt * p.sp * (0.45 + 3.2 * q15);
+      if (p.r <= R * 1.08) { spir.splice(i, 1); hole.feed = Math.min(1.5, hole.feed + 0.01); continue; }
+      const u = Math.cos(p.th) * p.r, v = Math.sin(p.th) * p.r * fl;
+      p.px = p.x; p.py = p.y;
+      p.x = hole.x + u * cr - v * sr; p.y = hole.y + u * sr + v * cr;
+      p.front = Math.sin(p.th) > 0;
+    }
+  }
+  function drawSpirals(front) {
+    ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    for (const p of spir) {
+      if (p.front !== front) continue;
+      const a = Math.min(1, p.age * 4), col = `hsl(${p.hue},100%,74%)`;
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = a * 0.22; ctx.lineWidth = p.size * 3.2;
+      ctx.beginPath(); ctx.moveTo(p.px, p.py); ctx.lineTo(p.x, p.y); ctx.stroke();
+      ctx.globalAlpha = a * 0.9; ctx.lineWidth = p.size;
+      ctx.beginPath(); ctx.moveTo(p.px, p.py); ctx.lineTo(p.x, p.y); ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+  function feedOrbit(dt) {
+    if (RM) return;
+    for (let i = 0; i < GENS.length; i++) {
+      const n = visN(counts[i]); if (!n) continue;
+      const perSec = Math.min(2.4, 0.18 + 0.16 * Math.log10(1 + prods[i])) * (1 + hole.rausch);
+      if (Math.random() < perSec * dt) {
+        orbitPos(i, Math.floor(Math.random() * n), n);
+        addSpiral(P.x, P.y, GENS[i].hue, 1.2 + ORB[i].size * 0.08, 0.7 + Math.random() * 0.5);
+      }
+    }
+  }
+
+  /* ---------- Sog beim Tippen: Teilchen wirbeln vom Tippunkt ins Loch ---------- */
+  const pulls = [];
+  function pull(x, y, n, hue, spread = 26) {
+    if (RM) n = Math.ceil(n / 2);
+    for (let k = 0; k < n; k++) {
+      const px = x + (Math.random() - 0.5) * spread * 2, py = y + (Math.random() - 0.5) * spread * 2;
+      const dx = px - hole.x, dy = (py - hole.y) / 0.78;
+      pulls.push({ r: Math.hypot(dx, dy), a: Math.atan2(dy, dx), hue: hn(hue ?? hole.hue + 20), size: 1.1 + Math.random() * 1.6, x: px, y: py, px, py, v: 30 + Math.random() * 60 });
+    }
+    if (pulls.length > 300) pulls.splice(0, pulls.length - 300);
+  }
+  function updatePulls(dt) {
+    const R = hole.R;
+    for (let i = pulls.length - 1; i >= 0; i--) {
+      const p = pulls[i];
+      p.v += dt * (500 + 2600 * R / Math.max(p.r, R));
+      p.r -= p.v * dt;
+      p.a -= dt * (1.2 + 6 * R / Math.max(p.r, R));
+      if (p.r <= R * 1.04) { pulls.splice(i, 1); hole.feed = Math.min(1.5, hole.feed + 0.015); continue; }
+      p.px = p.x; p.py = p.y;
+      p.x = hole.x + Math.cos(p.a) * p.r; p.y = hole.y + Math.sin(p.a) * p.r * 0.78;
+    }
+  }
+  function drawPulls() {
+    ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    for (const p of pulls) {
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = `hsl(${p.hue},100%,78%)`; ctx.lineWidth = p.size;
+      ctx.beginPath(); ctx.moveTo(p.px, p.py); ctx.lineTo(p.x, p.y); ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /* ---------- Beute, Großbeute, Rivale & Verschlingen ---------- */
+  let preyList = [], boss = null, rival = null;
+  const eaten = [], steals = [];
+
+  function drawTail(o, col) {
+    const hs = o.hist; if (!hs || hs.length < 2) return;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round'; ctx.strokeStyle = col;
+    for (let i = 1; i < hs.length; i++) {
+      const a = hs[i - 1], b = hs[i], k = i / hs.length;
+      ctx.globalAlpha = k * 0.6 * (o.alpha ?? 1);
+      ctx.lineWidth = 1 + o.size * 0.5 * k;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function drawPrey() {
+    for (const p of preyList) {
+      if (p.tail) drawTail(p, p.tail);
+      const a = p.alpha ?? 1;
+      // weicher Schein, damit Beute auf dem dunklen Himmel auffällt
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.22 * a;
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 1.3);
+      g.addColorStop(0, `hsla(${p.hue},100%,70%,1)`); g.addColorStop(1, 'hsla(0,0%,0%,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 1.3, 0, TAU); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+      drawSprite(ctx, p.spr, p.x, p.y, p.size, p.rot, p.v || 0, a);
+    }
+  }
+  function drawBoss() {
+    const b = boss; if (!b) return;
+    const sh = b.shake || 0, sx = sh ? (Math.random() - 0.5) * 7 * sh : 0, sy = sh ? (Math.random() - 0.5) * 7 * sh : 0;
+    const a = b.alpha ?? 1, pulse = 0.5 + 0.5 * Math.sin(clock * 5);
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = a;
+    ctx.strokeStyle = `hsla(${b.hue},100%,75%,${(0.3 + 0.25 * pulse).toFixed(2)})`; ctx.lineWidth = 2;
+    ctx.setLineDash([6, 7]); ctx.lineDashOffset = -clock * 24;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.size * 0.62 + 12, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    if (b.tail) drawTail(b, b.tail);
+    drawSprite(ctx, b.spr, b.x + sx, b.y + sy, b.size * (0.72 + 0.28 * b.hp / b.max), b.rot, 0, a);
+  }
+  function drawRival() {
+    const rv = rival; if (!rv || rv.vis <= 0) return;
+    const r = rv.r * rv.vis, sh = rv.shake || 0, x = rv.x + (sh ? (Math.random() - 0.5) * 6 * sh : 0), y = rv.y;
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(x, y, r * 0.8, x, y, r * 4.5);
+    g.addColorStop(0, 'hsla(285,95%,62%,.45)'); g.addColorStop(1, 'hsla(285,95%,40%,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 4.5, 0, TAU); ctx.fill();
+    const ring = front => {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(0.3); ctx.scale(1, 0.3);
+      ctx.beginPath(); if (front) ctx.rect(-r * 4, 0, r * 8, r * 4); else ctx.rect(-r * 4, -r * 4, r * 8, r * 4); ctx.clip();
+      const rg = ctx.createRadialGradient(0, 0, r * 1.15, 0, 0, r * 2.7);
+      rg.addColorStop(0, 'rgba(255,225,255,.95)'); rg.addColorStop(0.3, `hsla(${300 + 20 * Math.sin(clock * 3)},100%,65%,.75)`); rg.addColorStop(1, 'hsla(270,100%,45%,0)');
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(0, 0, r * 2.7, 0, TAU); ctx.arc(0, 0, r * 1.1, 0, TAU, true); ctx.fill();
+      ctx.restore();
+    };
+    ring(false);
+    ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = 'rgba(255,200,255,.85)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(x, y, r * 1.03, 0, TAU); ctx.stroke();
+    ring(true);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  // Der Rivale saugt Materie aus deiner Scheibe
+  function updateSteals(dt) {
+    if (rival && rival.stealing && rival.vis > 0.6 && !RM && Math.random() < dt * 22) {
+      const dir = Math.sign(rival.x - hole.x) || 1, x0 = hole.x + dir * hole.R * (1.3 + Math.random() * 0.8), y0 = hole.y + (Math.random() - 0.5) * hole.R * 0.5;
+      steals.push({ x0, y0, cx: (x0 + rival.x) / 2, cy: Math.min(y0, rival.y) - 30 - Math.random() * 30, t: 0, dur: 0.55 + Math.random() * 0.25, x: x0, y: y0, px: x0, py: y0, hue: hn(hole.hue + Math.random() * 30) });
+    }
+    for (let i = steals.length - 1; i >= 0; i--) {
+      const s = steals[i]; s.t += dt;
+      const k = s.t / s.dur;
+      if (k >= 1 || !rival) { steals.splice(i, 1); continue; }
+      const u = 1 - k;
+      s.px = s.x; s.py = s.y;
+      s.x = u * u * s.x0 + 2 * u * k * s.cx + k * k * rival.x; s.y = u * u * s.y0 + 2 * u * k * s.cy + k * k * rival.y;
+    }
+  }
+  function drawSteals() {
+    ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round'; ctx.lineWidth = 2;
+    for (const s of steals) { ctx.strokeStyle = `hsla(${s.hue},100%,75%,.85)`; ctx.beginPath(); ctx.moveTo(s.px, s.py); ctx.lineTo(s.x, s.y); ctx.stroke(); }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // Verschlingen: Objekt wirbelt ins Loch und wird dabei in die Länge gezogen (Spaghettifizierung)
+  function devour(o) {
+    const dx = o.x - hole.x, dy = (o.y - hole.y) / 0.8, r = Math.hypot(dx, dy);
+    eaten.push({ spr: o.spr, v: o.v || 0, size: o.size, hue: hn(o.hue ?? hole.hue), big: !!o.big, r0: r, r, a: Math.atan2(dy, dx), t: 0, dur: o.big ? 1.3 : 0.75, x: o.x, y: o.y, cb: o.cb });
+  }
+  function updateEaten(dt) {
+    const R = hole.R;
+    for (let i = eaten.length - 1; i >= 0; i--) {
+      const e = eaten[i];
+      e.t += dt;
+      const k = Math.min(1, e.t / e.dur);
+      e.r = R * 0.85 + (e.r0 - R * 0.85) * (1 - k * k);
+      e.a -= dt * (0.8 + 5 * k);
+      e.x = hole.x + Math.cos(e.a) * e.r; e.y = hole.y + Math.sin(e.a) * e.r * 0.8;
+      if (Math.random() < (e.big ? 1 : 0.5)) pull(e.x, e.y, 1, e.hue, e.size * 0.3);
+      if (k >= 1) {
+        eaten.splice(i, 1);
+        hole.feed = Math.min(1.6, hole.feed + (e.big ? 1.3 : 0.55)); hole.gulp = 1;
+        const bx = hole.x + Math.cos(e.a) * R, by = hole.y + Math.sin(e.a) * R * 0.8;
+        burst(bx, by, e.big ? 60 : 18, e.hue, e.big ? 1.6 : 0.9);
+        wave(hole.x, hole.y, R * 1.05, R * (e.big ? 3.5 : 1.6), e.big ? 0.8 : 0.45, { h: e.hue, width: e.big ? 5 : 3, alpha: e.big ? 0.8 : 0.5 });
+        if (e.big) shake(4, 0.5);
+        if (e.cb) e.cb();
+      }
+    }
+  }
+  function drawEaten() {
+    for (const e of eaten) {
+      const k = Math.min(1, e.t / e.dur), s = sprite(e.spr, e.v), d = e.size * s.pad;
+      const dir = Math.atan2(hole.y - e.y, hole.x - e.x);
+      ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(dir);
+      ctx.scale(1 + 2.8 * k * k, Math.max(0.12, 1 - 0.8 * k));
+      ctx.globalAlpha = k > 0.8 ? (1 - k) / 0.2 : 1;
+      ctx.drawImage(s.cv, -d / 2, -d / 2, d, d);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
 
   /* ---------- Bild zeichnen ---------- */
+  const timers = [];
+  let sogAcc = 0;
   function draw(t) {
-    const dt = Math.min(0.05, lastT ? Math.max(0, t - lastT) : 0.016);
+    const dtRaw = Math.min(0.05, lastT ? Math.max(0, t - lastT) : 0.016);
     lastT = t;
-    orb.hue += (orb.hueT - orb.hue) * Math.min(1, dt * 1.5);
-    orb.squish = Math.max(0, orb.squish - dt * 6);
+    // Zeitdehnung: alles läuft kurz in Zeitlupe
+    hole.warp = Math.max(0, hole.warp - dtRaw * 0.8);
+    const speed = 1 - 0.85 * Math.min(1, hole.warp / 0.35);
+    const dt = dtRaw * speed;
+    clock += dt;
+    for (let i = timers.length - 1; i >= 0; i--) { timers[i].t -= dtRaw; if (timers[i].t <= 0) { const f = timers[i].f; timers.splice(i, 1); f(); } }
 
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
+    const ease = Math.min(1, dtRaw * 4);
+    hole.R += (hole.Rt - hole.R) * Math.min(1, dtRaw * 2.2);
+    hole.hue += (hole.hueT - hole.hue) * Math.min(1, dtRaw * 1.2);
+    hole.sat += (hole.satT - hole.sat) * Math.min(1, dtRaw * 1.2);
+    hole.rausch += (hole.rauschT - hole.rausch) * ease;
+    hole.jet += (Math.max(hole.jetT, hole.jetBase) - hole.jet) * ease;
+    hole.sog += (hole.sogT - hole.sog) * ease;
+    hole.gulp = Math.max(0, hole.gulp - dtRaw * 5);
+    hole.feed = Math.max(0, hole.feed - dtRaw * 1.1);
+    hole.spin += dt * (0.32 + 0.6 * hole.rausch + 0.25 * Math.min(1, hole.feed) + 0.3 * hole.sog) * (RM ? 0.4 : 1);
+    const R = hole.R * (1 + 0.06 * hole.gulp);
+
+    // Sog-Fähigkeit: Materie strömt von überall herein
+    if (hole.sog > 0.05 && !RM) {
+      sogAcc += dtRaw;
+      if (Math.random() < dtRaw * 40 * hole.sog) {
+        const a = Math.random() * TAU, d = hole.orbitR * (0.9 + Math.random() * 0.5);
+        pull(hole.x + Math.cos(a) * d, hole.y + Math.sin(a) * d * 0.7, 1, hole.hue + 25, 6);
+      }
+      if (sogAcc > 0.45) { sogAcc = 0; wave(hole.x, hole.y, R * 4.2, -R * 3, 0.5, { width: 2.5, alpha: 0.45, h: hole.hue + 25 }); }
+    }
+    feedOrbit(dt);
+    updateSpirals(dt); updatePulls(dtRaw); updateEaten(dtRaw); updateSteals(dtRaw);
+
+    // Himmel (steht still, auch wenn das Bild wackelt)
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
     ctx.drawImage(bg, 0, 0, W, H);
-    // Nebelschleier ziehen langsam
     if (!RM) {
       ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55;
-      // Schleier ist größer als der Bildschirm und bleibt beim Ziehen immer ganz darüber:
-      // x zwischen −0,25 W und −0,05 W bei Breite 1,3 W, y zwischen −0,16 H und −0,04 H bei Höhe 1,2 H
+      // Schleier ist größer als der Bildschirm und bleibt beim Ziehen immer ganz darüber
       ctx.drawImage(veil, -W * 0.15 + Math.sin(t * 0.021) * W * 0.1, -H * 0.1 + Math.cos(t * 0.017) * H * 0.06, W * 1.3, H * 1.2);
       ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
     }
+    drawStars(t, dtRaw, R);
 
-    // Sterne
+    // Wackeln: beim Fressrausch leicht, bei Treffern kurz kräftiger
+    let ox = 0, oy = 0;
+    if (shakeOn && !RM) {
+      hole.shake = Math.max(0, hole.shake - dtRaw / hole.shakeDur);
+      const amp = Math.max(hole.shakeAmp * hole.shake, hole.rausch * 1.2);
+      if (amp > 0.05) { ox = (Math.random() - 0.5) * 2 * amp; oy = (Math.random() - 0.5) * 2 * amp; }
+    }
+    ctx.save(); ctx.translate(ox, oy);
+    composeDisk();
+    drawGlow(R);
+    drawOrbitLines();
+    drawOrbit(false);
+    drawSpirals(false);
+    // Helligkeit über mehrere additive Durchgänge (Fressrausch & Füttern machen die Scheibe heißer)
+    const bright = 1.55 + 0.45 * hole.rausch + 0.4 * Math.min(1, hole.feed);
+    diskGlow(R, 1 + 0.5 * hole.rausch + 0.4 * Math.min(1, hole.feed));
+    passes(a => diskHalf(R, false, a), bright);
+    passes(a => drawHalo(R, a), bright * 0.85);
+    drawShadow(R);
+    drawJets(R, hole.jet);
+    passes(a => diskHalf(R, true, a), bright);
+    drawOrbit(true);
+    drawSpirals(true);
+    drawPulls();
+    drawSteals();
+    drawRival();
+    drawPrey();
+    drawBoss();
+    drawEaten();
+    ctx.restore();
+    drawTop(t, dtRaw);
+  }
+
+  // Sterne mit Gravitationslinse: nahe am Loch werden sie nach außen gebogen (Einsteinring)
+  function drawStars(t, dt, R) {
+    const hx = hole.x, hy = hole.y, E2 = 4 * (R * 1.5) * (R * 1.5), lim2 = (R * 9) * (R * 9);
     for (const s of stars) {
       if (!RM) { s.y += s.z * 4 * dt; if (s.y > H) { s.y = 0; s.x = Math.random() * W; } }
+      let x = s.x, y = s.y;
+      const dx = x - hx, dy = y - hy, d2 = dx * dx + dy * dy;
+      if (d2 < lim2) { const d = Math.sqrt(d2) + 0.001, nd = (d + Math.sqrt(d2 + E2)) / 2; x = hx + dx / d * nd; y = hy + dy / d * nd; }
       const tw = 0.5 + 0.5 * Math.sin(t * s.sp + s.ph);
       ctx.globalAlpha = s.z * (0.3 + 0.7 * tw);
       ctx.fillStyle = s.col;
       const sz = s.z * 1.8;
-      ctx.fillRect(s.x, s.y, sz, sz);
-      if (s.glint && tw > 0.75) { // helle Sterne funkeln mit einem Kreuz
-        ctx.globalAlpha = (tw - 0.75) * 2.4;
-        star4(ctx, s.x + sz / 2, s.y + sz / 2, 5 + 4 * tw);
-      }
+      ctx.fillRect(x, y, sz, sz);
+      if (s.glint && tw > 0.75) { ctx.globalAlpha = (tw - 0.75) * 2.4; star4(ctx, x + sz / 2, y + sz / 2, 5 + 4 * tw); }
     }
     ctx.globalAlpha = 1;
-
-    drawRings(t, false);
-    drawOrb(t);
-    drawRings(t, true);
-    ctx.globalAlpha = 1;
-    drawTop(t, dt);
   }
 
-  // Obere Ebene: nur neu zeichnen, wenn etwas zu sehen ist
-  let topDirty = true;
+  /* ---------- Obere Ebene: Wellen, Funken, Zahlen, Blitze ---------- */
+  const parts = [], floats = [], waves = [], dust = [];
+  const target = { x: 0, y: 0 };
+  let flashA = 0, flashCol = '#fff6e6', topDirty = true;
+  const FONT = 'ui-rounded, -apple-system, system-ui, sans-serif';
   function drawTop(t, dt) {
     const c = tctx;
-    const busy = trail.length || parts.length || floats.length || waves.length || dust.length || head || orb.flash > 0;
+    const busy = parts.length || floats.length || waves.length || dust.length || flashA > 0;
     if (busy || topDirty) c.clearRect(0, 0, W, H);
     topDirty = busy;
     if (!busy) return;
     c.globalCompositeOperation = 'lighter';
 
-    // Druckwellen
     for (let i = waves.length - 1; i >= 0; i--) {
       const w = waves[i];
       if (w.delay > 0) { w.delay -= dt; continue; }
       w.life -= dt;
       if (w.life <= 0) { waves.splice(i, 1); continue; }
-      const k = w.life / w.max, e = 1 - k * k;
-      c.globalAlpha = k * w.alpha;
-      c.strokeStyle = `hsl(${hn(w.h)},100%,82%)`; c.lineWidth = 0.6 + w.width * k;
-      c.beginPath(); c.arc(w.x, w.y, w.r0 + w.spread * e, 0, TAU); c.stroke();
+      const k = w.life / w.max, e = 1 - k * k, r = w.r0 + w.spread * e;
+      if (r <= 0) continue;
+      c.globalAlpha = (w.spread < 0 ? 1 - k * 0.6 : k) * w.alpha;
+      c.strokeStyle = `hsl(${hn(w.h)},100%,82%)`; c.lineWidth = 0.6 + w.width * (w.spread < 0 ? 1 - k * 0.5 : k);
+      c.beginPath(); c.arc(w.x, w.y, r, 0, TAU); c.stroke();
     }
 
-    // Schweif der Sternschnuppe – sich verjüngendes Lichtband
-    for (let i = trail.length - 1; i >= 0; i--) { trail[i].life -= dt; if (trail[i].life <= 0) trail.splice(i, 1); }
-    if (trail.length > 1) {
-      c.lineCap = 'round';
-      for (let i = 1; i < trail.length; i++) {
-        const a = trail[i - 1], b = trail[i], k = b.life / 0.7;
-        c.globalAlpha = k * 0.75;
-        c.strokeStyle = `hsl(${40 + (1 - k) * 280},100%,${78 + k * 10}%)`;
-        c.lineWidth = 1 + 9 * k;
-        c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
-      }
-    }
-
-    // Kopf der Sternschnuppe
-    if (head) {
-      const { x, y } = head, rot = t * 2.2;
-      c.globalAlpha = 1;
-      let g = c.createRadialGradient(x, y, 0, x, y, 34);
-      g.addColorStop(0, 'rgba(255,240,200,.95)'); g.addColorStop(0.25, 'rgba(255,200,110,.45)'); g.addColorStop(1, 'rgba(255,150,200,0)');
-      c.fillStyle = g; c.beginPath(); c.arc(x, y, 34, 0, TAU); c.fill();
-      c.fillStyle = 'rgba(255,255,255,.9)';
-      c.save(); c.translate(x, y); c.rotate(rot); star4(c, 0, 0, 22); c.rotate(Math.PI / 4); c.globalAlpha = 0.6; star4(c, 0, 0, 12); c.restore();
-      c.globalAlpha = 1; c.fillStyle = '#fff'; c.beginPath(); c.arc(x, y, 4.5, 0, TAU); c.fill();
-      if (Math.random() < 0.35) parts.push({ x, y, vx: (Math.random() - 0.5) * 40, vy: 10 + Math.random() * 30, life: 0.7, max: 0.7, size: 1 + Math.random() * 1.5, h: 40 + Math.random() * 20, spark: Math.random() < 0.5, g: 20 });
-    }
-
-    // Funken
     for (let i = parts.length - 1; i >= 0; i--) {
       const p = parts[i];
       p.life -= dt;
@@ -316,7 +1004,7 @@ const FX = (() => {
       else { c.beginPath(); c.arc(p.x, p.y, p.size * (0.4 + 0.6 * k), 0, TAU); c.fill(); }
     }
 
-    // Staub fliegt in den Zähler
+    // Masse fliegt in den Zähler
     for (let i = dust.length - 1; i >= 0; i--) {
       const d = dust[i];
       d.life -= dt;
@@ -327,91 +1015,131 @@ const FX = (() => {
       const px = d.x, py = d.y;
       d.x += d.vx * dt; d.y += d.vy * dt;
       c.globalAlpha = Math.min(1, d.life * 3) * 0.9;
-      c.strokeStyle = 'hsl(42,100%,78%)'; c.lineWidth = 2.2; c.lineCap = 'round';
+      c.strokeStyle = d.col || 'hsl(42,100%,78%)'; c.lineWidth = 2.2; c.lineCap = 'round';
       c.beginPath(); c.moveTo(px, py); c.lineTo(d.x, d.y); c.stroke();
     }
 
-    // Zahlen
     if (floats.length) {
       c.globalCompositeOperation = 'source-over';
       c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.shadowColor = 'rgba(255,180,100,.9)'; c.shadowBlur = 12;
       for (let i = floats.length - 1; i >= 0; i--) {
         const f = floats[i];
         f.life -= dt;
         if (f.life <= 0) { floats.splice(i, 1); continue; }
-        f.y -= 64 * dt;
-        const age = f.max - f.life, s = age < 0.14 ? 0.6 + age / 0.14 * 0.45 : Math.max(1, 1.05 - (age - 0.14) * 0.3);
+        f.y -= (f.style === 'loss' ? -26 : 64) * dt;
+        const age = f.max - f.life, pop = f.style === 'crit' ? 1.25 : 1.05;
+        const s = age < 0.14 ? 0.6 + age / 0.14 * (pop - 0.6) : Math.max(1, pop - (age - 0.14) * 0.4);
         c.globalAlpha = Math.min(1, f.life * 2.4);
         c.save(); c.translate(f.x, f.y); c.scale(s, s);
-        c.font = `800 ${f.big ? 26 : 21}px ui-rounded, -apple-system, system-ui, sans-serif`;
-        c.fillStyle = f.big ? '#ffe39c' : '#ffffff';
+        const st = FSTYLE[f.style] || FSTYLE.tap;
+        c.shadowColor = st.glow; c.shadowBlur = st.blur;
+        c.font = `800 ${st.size}px ${FONT}`; c.fillStyle = st.col;
         c.fillText(f.text, 0, 0);
+        if (st.label) { c.font = `850 10.5px ${FONT}`; c.fillStyle = st.labelCol; c.fillText(st.label, 0, -st.size * 0.82); }
         c.restore();
       }
       c.shadowBlur = 0;
     }
 
-    // Supernova-Blitz
-    if (orb.flash > 0) {
-      orb.flash -= dt * 0.7;
+    if (flashA > 0) {
+      flashA -= dt * 0.75;
       c.globalCompositeOperation = 'source-over';
-      c.globalAlpha = Math.max(0, Math.min(1, orb.flash));
-      c.fillStyle = '#fff6e6'; c.fillRect(0, 0, W, H);
+      c.globalAlpha = clamp(flashA, 0, 1);
+      c.fillStyle = flashCol; c.fillRect(0, 0, W, H);
     }
     c.globalAlpha = 1;
     c.globalCompositeOperation = 'source-over';
   }
+  const FSTYLE = {
+    tap:  { size: 21, col: '#ffffff', glow: 'rgba(255,170,90,.9)', blur: 12 },
+    big:  { size: 26, col: '#ffe39c', glow: 'rgba(255,170,90,.95)', blur: 14 },
+    crit: { size: 31, col: '#ffd060', glow: 'rgba(255,90,40,.95)', blur: 16, label: 'KRITISCH', labelCol: '#ffb4a0' },
+    loss: { size: 17, col: '#ff8fa6', glow: 'rgba(255,40,90,.8)', blur: 10 },
+    info: { size: 15, col: '#bdf0ff', glow: 'rgba(80,200,255,.8)', blur: 10 },
+    mini: { size: 14, col: 'rgba(255,255,255,.85)', glow: 'rgba(255,170,90,.7)', blur: 8 },
+    minigold: { size: 16, col: '#ffd060', glow: 'rgba(255,90,40,.8)', blur: 10 },
+  };
 
   function burst(x, y, n, hue, speed = 1) {
     if (RM) n = Math.ceil(n / 3);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * TAU, v = (60 + Math.random() * 170) * speed, max = 0.5 + Math.random() * 0.7;
-      parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: max, max, size: 1.4 + Math.random() * 2.6, h: (hue ?? orb.hue) + (Math.random() - 0.5) * 70, spark: Math.random() < 0.35 });
+      parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: max, max, size: 1.4 + Math.random() * 2.6, h: (hue ?? hole.hue) + (Math.random() - 0.5) * 60, spark: Math.random() < 0.35 });
     }
     if (parts.length > 500) parts.splice(0, parts.length - 500);
   }
-
+  // spread < 0: Welle zieht sich zum Loch hin zusammen
   function wave(x, y, r0, spread, life, opts = {}) {
     if (RM) return;
-    waves.push({ x, y, r0, spread, life, max: life, h: opts.h ?? orb.hue, width: opts.width ?? 3, alpha: opts.alpha ?? 0.55, delay: opts.delay ?? 0 });
-    if (waves.length > 24) waves.shift();
+    waves.push({ x, y, r0, spread, life, max: life, h: opts.h ?? hole.hue, width: opts.width ?? 3, alpha: opts.alpha ?? 0.55, delay: opts.delay ?? 0 });
+    if (waves.length > 30) waves.shift();
   }
-
-  function float(x, y, text, big) {
-    floats.push({ x: x + (Math.random() - 0.5) * 24, y: y - 14, text, big, life: 1.1, max: 1.1 });
+  function float(x, y, text, style = 'tap') {
+    const life = style === 'crit' ? 1.3 : style === 'loss' ? 1 : 1.1;
+    floats.push({ x: x + (Math.random() - 0.5) * 24, y: y - 14, text, style, life, max: life });
     if (floats.length > 40) floats.shift();
+  }
+  function toCounter(x, y, n, col) {
+    if (RM) return;
+    for (let i = 0; i < n && dust.length < 60; i++) {
+      const a = Math.random() * TAU, v = 200 + Math.random() * 120;
+      dust.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 120, life: 1.4, col });
+    }
+  }
+  function shake(amp, dur = 0.3) {
+    if (amp >= hole.shakeAmp * hole.shake) { hole.shakeAmp = amp; hole.shake = 1; hole.shakeDur = dur; }
   }
 
   return {
-    orb, resize, layout, draw, burst, float, wave,
-    tap(x, y, text, manual) {
-      float(x, y, text);
-      burst(x, y, manual ? 7 : 3);
-      if (!manual) return;
-      if (!RM) orb.squish = 1;
-      wave(orb.x, orb.y, orb.r * 0.98, orb.r * 0.45, 0.42, { width: 2.5, alpha: 0.45 });
-      if (!RM && dust.length < 50) for (let i = 0; i < 2; i++) {
-        const a = Math.random() * TAU;
-        dust.push({ x, y, vx: Math.cos(a) * 260, vy: Math.sin(a) * 260 - 120, life: 1.4 });
-      }
+    hole, resize, layout, draw, burst, float, wave, pull, devour, shake, sprite, setStage,
+    tap(x, y, text, kind) {
+      if (kind === 'auto' || kind === 'autocrit') { float(x, y, text, kind === 'autocrit' ? 'minigold' : 'mini'); pull(x, y, 2, hole.hue + 20, 14); return; }
+      float(x, y, text, kind === 'crit' ? 'crit' : 'tap');
+      pull(x, y, kind === 'crit' ? 12 : 6, hole.hue + 20);
+      hole.gulp = Math.max(hole.gulp, kind === 'crit' ? 1 : 0.6);
+      wave(hole.x, hole.y, hole.R * 3.4, -hole.R * 2.3, 0.4, { width: 2.2, alpha: 0.38 });
+      if (kind === 'crit') {
+        burst(x, y, 26, 30, 1.3);
+        wave(x, y, 6, 70, 0.5, { h: 35, width: 4, alpha: 0.8 });
+        shake(3.2, 0.25);
+      } else burst(x, y, 5);
+      toCounter(x, y, kind === 'crit' ? 4 : 2);
     },
-    trail(x, y) { trail.push({ x, y, life: 0.7 }); if (trail.length > 60) trail.shift(); },
-    setStar(s) { head = s; },
+    toCounter,
+    feed(a) { hole.feed = Math.min(1.6, hole.feed + a); hole.gulp = 1; },
+    flash(a, col = '#fff6e6') { flashA = Math.max(flashA, a); flashCol = col; },
+    setMode(k, v) { hole[k + 'T'] = v; },
+    setOrbit(gens, pr) { counts = gens.slice(); if (pr) prods = pr.slice(); },
+    setPrey(list) { preyList = list; },
+    setBoss(b) { boss = b; },
+    setRival(r) { rival = r; },
     setCollect(x, y) { target.x = x; target.y = y; },
-    setRate(r) { orb.pulseF = 1.4 + Math.min(4, Math.log10(r + 1) * 0.45); },
-    nova() {
-      orb.flash = 1.3; burst(orb.x, orb.y, 200, orb.hue, 2.4);
-      for (let i = 0; i < 3; i++) wave(orb.x, orb.y, orb.r, Math.max(W, H) * (0.5 + i * 0.2), 1.4 + i * 0.2, { width: 8 - i * 2, alpha: 0.8, delay: i * 0.18 });
+    setShake(on) { shakeOn = on; },
+    after(sec, f) { timers.push({ t: sec, f }); },
+    stageUp() {
+      hole.feed = 1.6; hole.gulp = 1;
+      flashA = Math.max(flashA, 0.35); flashCol = `hsl(${hn(hole.hue)},100%,85%)`;
+      burst(hole.x, hole.y, 90, hole.hue, 2);
+      for (let i = 0; i < 3; i++) wave(hole.x, hole.y, hole.R, Math.max(W, H) * (0.35 + i * 0.15), 1.1 + i * 0.2, { width: 6 - i * 1.5, alpha: 0.8, delay: i * 0.15 });
+      shake(5, 0.6);
     },
-    setRings(a) { rings = a; },
-    setHue(h) { orb.hueT = h; },
+    bigBang() {
+      flashA = 1.3; flashCol = '#fff6e6';
+      burst(hole.x, hole.y, 200, hole.hue, 2.4);
+      for (let i = 0; i < 3; i++) wave(hole.x, hole.y, hole.R, Math.max(W, H) * (0.5 + i * 0.2), 1.4 + i * 0.2, { width: 8 - i * 2, alpha: 0.8, delay: i * 0.18 });
+      hole.R = 2; spir.length = 0; pulls.length = 0;
+    },
+    timeWarp(done) {
+      hole.warp = 1.2;
+      for (let i = 0; i < 4; i++) wave(hole.x, hole.y, Math.max(W, H) * 0.6, -Math.max(W, H) * 0.6 + hole.R, 0.9, { width: 5, alpha: 0.6, h: 45, delay: i * 0.12 });
+      timers.push({ t: 0.95, f: () => { flashA = Math.max(flashA, 0.45); flashCol = '#fff2d0'; burst(hole.x, hole.y, 70, 45, 1.8); hole.feed = 1.6; shake(5, 0.5); if (done) done(); } });
+    },
   };
 })();
 
 /* ---------- Töne (Web Audio, synthetisch – keine Dateien nötig) ---------- */
 const SND = (() => {
-  let ac = null, master = null, on = true, lastTap = 0;
+  let ac = null, master = null, on = true, lastTap = 0, noiseBuf = null;
   const SC = [0, 2, 4, 7, 9, 12, 14];
   const f = (semi, base = 523.25) => base * Math.pow(2, semi / 12);
 
@@ -424,35 +1152,68 @@ const SND = (() => {
     }
     if (ac.state !== 'running') ac.resume().catch(() => {});
   }
+  const ready = () => on && ac && ac.state === 'running';
 
-  function tone(freq, dur, type, vol, delay = 0) {
-    if (!on || !ac || ac.state !== 'running') return;
+  function tone(freq, dur, type, vol, delay = 0, to) {
+    if (!ready()) return;
     const t = ac.currentTime + delay;
     const o = ac.createOscillator(), g = ac.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, t);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(master);
     o.start(t); o.stop(t + dur + 0.05);
   }
+  // Rauschen durch einen wandernden Bandpass – „Wusch“
+  function whoosh(dur, vol, f0, f1, delay = 0) {
+    if (!ready()) return;
+    if (!noiseBuf) {
+      noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const t = ac.currentTime + delay, src = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = noiseBuf; bp.type = 'bandpass'; bp.Q.value = 0.9;
+    bp.frequency.setValueAtTime(f0, t); bp.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + dur * 0.35); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(bp); bp.connect(g); g.connect(master);
+    src.start(t); src.stop(t + dur + 0.05);
+  }
   const seq = (notes, base, type, vol, gap, dur) => notes.forEach((s, i) => tone(f(s, base), dur, type, vol, i * gap));
 
   return {
     unlock,
     setOn(v) { on = v; },
-    tap() {
+    tap(hot) {
       const now = performance.now();
       if (now - lastTap < 35) return;
       lastTap = now;
+      tone(150, 0.16, 'sine', 0.26, 0, 50);
       const s = SC[Math.floor(Math.random() * SC.length)];
-      tone(f(s), 0.22, 'sine', 0.22);
-      tone(f(s + 12), 0.12, 'triangle', 0.04);
+      tone(f(s + (hot ? 12 : 0), 392), 0.18, 'sine', 0.09);
     },
+    crit() { seq([12, 19, 24], 523.25, 'triangle', 0.11, 0.03, 0.4); tone(500, 0.14, 'sine', 0.08, 0, 1800); tone(120, 0.3, 'sine', 0.3, 0, 40); },
+    devour(big) { tone(big ? 600 : 900, big ? 0.7 : 0.32, 'sine', big ? 0.24 : 0.17, 0, big ? 60 : 110); tone(1800, 0.25, 'triangle', 0.035, 0, 240); if (big) tone(70, 1.1, 'sine', 0.4, 0.2, 35); },
     buy() { seq([0, 4, 7], 392, 'triangle', 0.12, 0.045, 0.18); },
     up() { seq([0, 7, 12, 16], 440, 'sine', 0.15, 0.06, 0.25); },
     star() { seq([0, 4, 7, 11, 14, 19, 23, 26], 659, 'sine', 0.12, 0.045, 0.3); },
     ach() { seq([7, 12, 16, 19], 523.25, 'triangle', 0.12, 0.08, 0.35); },
+    rausch() { tone(110, 0.7, 'sawtooth', 0.05, 0, 880); seq([0, 4, 7, 12, 16, 19], 261.6, 'triangle', 0.1, 0.06, 0.45); whoosh(0.8, 0.2, 300, 3000); },
+    rauschEnd() { tone(440, 0.5, 'sine', 0.08, 0, 110); },
+    alarm() { tone(73, 0.9, 'sawtooth', 0.045); tone(77.8, 0.9, 'sawtooth', 0.045); tone(146, 0.5, 'triangle', 0.05, 0.25, 98); },
+    hit() { tone(240, 0.12, 'triangle', 0.13, 0, 70); },
+    win() { seq([0, 4, 7, 12, 16, 19, 24], 392, 'triangle', 0.12, 0.06, 0.45); tone(70, 1.2, 'sine', 0.4, 0, 38); },
+    lost() { seq([7, 3, 0], 293.7, 'sine', 0.09, 0.12, 0.35); },
+    steal() { tone(320, 0.08, 'sine', 0.03, 0, 520); },
+    ability() { whoosh(0.7, 0.3, 250, 2600); tone(220, 0.6, 'sine', 0.1, 0, 660); },
+    warp() { tone(900, 1.0, 'sine', 0.16, 0, 55); whoosh(1.0, 0.2, 3000, 200); seq([0, 7, 12, 19, 24], 261.6, 'sine', 0.1, 0.08, 0.6); },
+    chest(r) {
+      const n = { c: [0, 4, 7], r: [0, 4, 7, 12], e: [0, 4, 7, 11, 14, 19], l: [0, 4, 7, 12, 16, 19, 24, 28] }[r] || [0, 4, 7];
+      whoosh(0.4, 0.15, 400, 2400); seq(n, 523.25, 'sine', 0.12, 0.055, 0.4);
+      if (r === 'l' || r === 'e') tone(65, 1.1, 'sine', 0.35, 0.05, 40);
+    },
+    stageUp() { seq([0, 7, 12, 16, 19, 24], 261.6, 'sine', 0.12, 0.09, 0.8); tone(60, 1.5, 'sine', 0.42, 0, 34); whoosh(1.2, 0.18, 200, 1800); },
     nova() { tone(55, 2.2, 'sine', 0.5); seq([0, 7, 12, 19, 24, 31], 261.6, 'sine', 0.1, 0.12, 1.2); },
     tab() { tone(f(12, 523.25), 0.06, 'sine', 0.05); },
   };
@@ -462,15 +1223,17 @@ const SND = (() => {
 const HAP = (() => {
   let on = true, last = 0;
   const lab = document.getElementById('hapLabel');
+  function fire(force) {
+    if (!on) return;
+    const t = performance.now();
+    if (!force && t - last < 45) return;
+    last = t;
+    if (navigator.vibrate) { try { navigator.vibrate(10); } catch (e) {} return; }
+    if (lab) lab.click();
+  }
   return {
     setOn(v) { on = v; },
-    fire(force) {
-      if (!on) return;
-      const t = performance.now();
-      if (!force && t - last < 45) return;
-      last = t;
-      if (navigator.vibrate) { try { navigator.vibrate(10); } catch (e) {} return; }
-      if (lab) lab.click();
-    },
+    fire,
+    burst(n, gap = 70) { for (let i = 0; i < n; i++) setTimeout(() => fire(true), i * gap); },
   };
 })();
