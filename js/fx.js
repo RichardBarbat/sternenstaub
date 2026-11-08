@@ -81,6 +81,14 @@ const FX = (() => {
     c.clearRect(0, 0, w, h);
     const cols = ['rgba(160,90,255,0.22)', 'rgba(255,110,190,0.14)', 'rgba(80,160,255,0.16)', 'rgba(255,200,140,0.08)'];
     for (let i = 0; i < 9; i++) blob(c, Math.random() * w, Math.random() * h, (0.15 + Math.random() * 0.3) * Math.max(w, h), cols[i % cols.length]);
+    // Ränder weich ausblenden, damit nie eine Kante als Streifen sichtbar wird
+    c.globalCompositeOperation = 'destination-in';
+    for (const [x1, y1] of [[w, 0], [0, h]]) {
+      const g = c.createLinearGradient(0, 0, x1, y1);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.12, '#000'); g.addColorStop(0.88, '#000'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+    }
+    c.globalCompositeOperation = 'source-over';
   }
 
   function makeStars() {
@@ -218,7 +226,9 @@ const FX = (() => {
     // Nebelschleier ziehen langsam
     if (!RM) {
       ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55;
-      ctx.drawImage(veil, Math.sin(t * 0.021) * W * 0.08 - W * 0.05, Math.cos(t * 0.017) * H * 0.05 - H * 0.03, W * 1.1, H * 1.1);
+      // Schleier ist größer als der Bildschirm und bleibt beim Ziehen immer ganz darüber:
+      // x zwischen −0,25 W und −0,05 W bei Breite 1,3 W, y zwischen −0,16 H und −0,04 H bei Höhe 1,2 H
+      ctx.drawImage(veil, -W * 0.15 + Math.sin(t * 0.021) * W * 0.1, -H * 0.1 + Math.cos(t * 0.017) * H * 0.06, W * 1.3, H * 1.2);
       ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
     }
 

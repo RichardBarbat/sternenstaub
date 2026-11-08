@@ -2,7 +2,7 @@
 /* Sternenstaub – Spiellogik & Oberfläche */
 
 const SAVE_KEY = 'sternenstaub-v1';
-const VERSION = '1.4';
+const VERSION = '1.5';
 const $ = s => document.querySelector(s);
 const el = {
   dust: $('#dust'), rate: $('#rate'), tapv: $('#tapv'), buffs: $('#buffs'), stage: $('#stage'), hint: $('#hint'),
