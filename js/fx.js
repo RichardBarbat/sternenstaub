@@ -1,5 +1,5 @@
 'use strict';
-/* Sternenstaub – Grafik, Töne & Vibration
+/* Singularität – Grafik, Töne & Vibration
    #sky : Himmel mit Gravitationslinse, Schwarzes Loch mit Akkretionsscheibe, Orbit und Beute (Inhaltsebene)
    #fx  : Funken, Druckwellen, Zahlen, Blitze – liegt über Panel & Menü */
 
@@ -18,7 +18,7 @@ const FX = (() => {
   const RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
   const hn = h => ((h % 360) + 360) % 360;
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-  let W = 0, H = 0, DPR = 1, stars = [], lastT = 0, clock = 0, shakeOn = true, sfCur = 0;
+  let W = 0, H = 0, DPR = 1, stars = [], lastT = 0, clock = 0, shakeOn = true, sfCur = 0, glOn = true;
 
   // Kleiner, reproduzierbarer Zufall (gleiche Form für gleiche Variante)
   function rng(seed) {
@@ -34,7 +34,7 @@ const FX = (() => {
   /* ---------- Das Schwarze Loch ---------- */
   const hole = {
     x: 0, y: 0, R: 4, Rt: 24, Rmin: 18, Rmax: 56, orbitR: 180, top: 0, bottom: 0,
-    hue: 14, hueT: 14, sat: 100, satT: 100, roll: -0.12, k: 0.23, spin: 0,
+    hue: 14, hueT: 14, sat: 100, satT: 100, roll: -0.12, k: 0.23, kT: 0.23, spin: 0,
     feed: 0, gulp: 0, rausch: 0, rauschT: 0, jet: 0, jetT: 0, jetBase: 0, sog: 0, sogT: 0, warp: 0, shake: 0, shakeAmp: 0, shakeDur: 0.3,
   };
 
@@ -54,10 +54,12 @@ const FX = (() => {
   function layout() {
     const st = document.getElementById('stage').getBoundingClientRect();
     hole.x = st.left + st.width / 2;
-    hole.y = st.top + st.height * 0.5;
+    hole.y = st.top + st.height * (0.5 - 0.05 * clamp((st.height - 360) / 240, 0, 1));
     hole.top = st.top; hole.bottom = st.bottom;
     // Scheibe (2,75 R) soll neben die Knöpfe am Rand passen, das Loch nicht zu hoch werden
-    hole.Rmax = clamp(Math.min(st.height * 0.17, (st.width / 2 - 52) / 2.75), 20, 60);
+    const tall = clamp((st.height - 360) / 240, 0, 1);
+    hole.kT = 0.23 + 0.13 * tall;
+    hole.Rmax = clamp(Math.min(st.height * 0.17, (st.width / 2 - (52 - 34 * tall)) / 2.75), 20, 60 + 22 * tall);
     hole.Rmin = Math.max(14, hole.Rmax * 0.55);
     hole.orbitR = Math.max(70, Math.min(st.width / 2 - 8, (st.height / 2 - 14) / 0.42));
     setStage(sfCur);
@@ -68,7 +70,7 @@ const FX = (() => {
     const i = Math.min(STAGES.length - 1, Math.floor(sf)), j = Math.min(STAGES.length - 1, i + 1), f = sf - i;
     hole.hueT = STAGES[i].hue + (STAGES[j].hue - STAGES[i].hue) * f;
     hole.satT = STAGES[i].sat + (STAGES[j].sat - STAGES[i].sat) * f;
-    hole.Rt = hole.Rmin + (hole.Rmax - hole.Rmin) * Math.pow(Math.min(1, sf / 9), 0.8);
+    hole.Rt = hole.Rmin + (hole.Rmax - hole.Rmin) * Math.pow(Math.min(1, sf / (STAGES.length - 1)), 0.7);
     hole.jetBase = sf >= 6 ? 0.4 : 0;
   }
 
@@ -255,6 +257,106 @@ const FX = (() => {
     ctx.drawImage(halo, hole.x - h / DPR, hole.y - h / DPR, S / DPR, S / DPR);
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   }
+
+  /* ---------- Aufwendige Grafik: Strahlengang im Shader ----------
+     Für jeden Bildpunkt wird ein Lichtstrahl durch die gekrümmte Raumzeit verfolgt (Schwarzschild).
+     So entstehen Schatten, Photonenring und der über das Loch gebogene Lichtbogen von selbst.
+     Schlägt irgendetwas fehl, zeichnet das Spiel wie bisher mit der 2D-Scheibe. */
+  const GLH = (() => {
+    const cnv = mk(8, 8);
+    let gl = null, prog = null, U = {}, ok = false;
+    const FS = `precision highp float;
+uniform vec2 uRes; uniform float uTilt, uRoll, uSpin, uBright, uView;
+uniform vec3 uHot, uMid, uCool;
+const float RIN = 3.0, ROUT = 7.15;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p, float per){
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  float y0 = mod(i.y, per), y1 = mod(i.y + 1.0, per);
+  return mix(mix(hash(vec2(i.x, y0)), hash(vec2(i.x + 1.0, y0)), f.x), mix(hash(vec2(i.x, y1)), hash(vec2(i.x + 1.0, y1)), f.x), f.y);
+}
+void main(){
+  vec2 uv = (gl_FragCoord.xy / uRes - 0.5) * 2.0 * uView;
+  float cr = cos(uRoll), sr = sin(uRoll); uv = vec2(uv.x * cr - uv.y * sr, uv.x * sr + uv.y * cr);
+  float ct = cos(uTilt), st = sin(uTilt);
+  vec3 fwd = vec3(0.0, -st, -ct), up = vec3(0.0, ct, -st);
+  vec3 p = -fwd * 24.0 + vec3(uv.x, 0.0, 0.0) + up * uv.y, v = fwd;
+  vec3 hv = cross(p, v); float h2 = dot(hv, hv);
+  vec3 col = vec3(0.0); float alpha = 0.0, shadow = 0.0, rmin = 99.0;
+  for (int i = 0; i < 120; i++) {
+    float r2 = dot(p, p);
+    if (r2 < 1.0) { shadow = 1.0; break; }
+    float r = sqrt(r2), dt = clamp(0.1 * r, 0.04, 2.0); rmin = min(rmin, r);
+    v += -1.5 * h2 * p / (r2 * r2 * r) * dt;
+    vec3 pn = p + v * dt;
+    if (p.y * pn.y < 0.0) {
+      vec3 q = mix(p, pn, p.y / (p.y - pn.y)); float rr = length(q.xz);
+      if (rr > RIN && rr < ROUT) {
+        float u = (rr - RIN) / (ROUT - RIN);
+        float t = pow(1.0 - u, 1.6) * smoothstep(0.0, 0.05, u);
+        float ph = (atan(q.z, q.x) + uSpin * pow(RIN / rr, 1.5)) / 6.2831853;
+        float n = 0.6 * noise(vec2(rr * 1.3, ph * 5.0), 5.0) + 0.4 * noise(vec2(rr * 4.2, ph * 16.0), 16.0);
+        float dop = 1.0 + 0.4 * dot(vec3(q.z, 0.0, -q.x) / rr, -v) * sqrt(RIN / rr); dop = dop * dop * dop;
+        float I = t * (0.22 + 1.5 * n * n) * dop * uBright;
+        vec3 c = mix(uCool, uMid, smoothstep(0.0, 0.45, t));
+        c = mix(c, uHot, smoothstep(0.3, 1.0, t * min(dop, 1.7)));
+        float a2 = clamp(I * 1.3, 0.0, 1.0) * smoothstep(1.0, 0.82, u);
+        col += (1.0 - alpha) * c * min(I, 1.6) * 1.15; alpha += (1.0 - alpha) * a2;
+      }
+    }
+    p = pn;
+    if (r2 > 900.0 && dot(p, v) > 0.0) break;
+  }
+  col = min(col, vec3(1.0));
+  shadow = max(shadow, 1.0 - smoothstep(1.5, 1.6, rmin)); // weicher Schattenrand
+  gl_FragColor = vec4(col, max(shadow, max(col.r, max(col.g, col.b))));
+}`;
+    function init() {
+      try {
+        gl = cnv.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, powerPreference: 'low-power' });
+        if (!gl) return;
+        const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+        prog = gl.createProgram();
+        gl.attachShader(prog, sh(gl.VERTEX_SHADER, 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }'));
+        gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+        gl.linkProgram(prog);
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+        gl.useProgram(prog);
+        gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+        const loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+        for (const k of ['uRes', 'uTilt', 'uRoll', 'uSpin', 'uBright', 'uView', 'uHot', 'uMid', 'uCool']) U[k] = gl.getUniformLocation(prog, k);
+        cnv.addEventListener('webglcontextlost', e => { e.preventDefault(); ok = false; });
+        cnv.addEventListener('webglcontextrestored', () => { ok = false; init(); });
+        ok = true;
+      } catch (e) { ok = false; if (window.console) console.warn('Shader nicht verfügbar – einfache Grafik', e); }
+    }
+    const hsl = (h, s, l) => { // → rgb 0..1
+      h = hn(h) / 360; s /= 100; l /= 100;
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p2 = 2 * l - q;
+      const f = t => { t = (t + 1) % 1; return t < 1 / 6 ? p2 + (q - p2) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p2 + (q - p2) * (2 / 3 - t) * 6 : p2; };
+      return [f(h + 1 / 3), f(h), f(h - 1 / 3)];
+    };
+    init();
+    return {
+      get ok() { return ok; },
+      // zeichnet das Loch; gibt die Kantenlänge des Bildes in CSS-Pixeln zurück
+      render(R, bright) {
+        const view = 7.15 * 1.1, S = 2 * view * R / 2.598;
+        const N = Math.max(64, Math.min(560, Math.round(S * DPR)));
+        if (cnv.width !== N) { cnv.width = N; cnv.height = N; }
+        gl.viewport(0, 0, N, N);
+        gl.uniform2f(U.uRes, N, N); gl.uniform1f(U.uView, view);
+        gl.uniform1f(U.uTilt, Math.asin(clamp(hole.k, 0.05, 0.9))); gl.uniform1f(U.uRoll, hole.roll);
+        gl.uniform1f(U.uSpin, hole.spin * 3); gl.uniform1f(U.uBright, bright);
+        const H0 = hole.hue, S0 = hole.sat, hot = hole.rausch * 8;
+        gl.uniform3fv(U.uHot, hsl(H0 + 28, S0, 95)); gl.uniform3fv(U.uMid, hsl(H0, S0, 56 + hot)); gl.uniform3fv(U.uCool, hsl(H0 - 26, S0 * 0.9, 30 + hot));
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        return S;
+      },
+      cnv,
+    };
+  })();
 
   function passes(f, total) { for (let k = 0; total > 0.02 && k < 4; k++, total -= 1) f(Math.min(1, total)); }
   // weicher Schein entlang der Scheibenebene – lässt das Gas leuchten
@@ -584,6 +686,56 @@ const FX = (() => {
       for (let i = -6; i <= 6; i++) { g.fillStyle = `rgba(${90 + rnd() * 80 | 0},${20 + rnd() * 30 | 0},${15 + rnd() * 20 | 0},.35)`; g.fillRect(-B, i * B * 0.17, B * 2, B * (0.05 + rnd() * 0.07)); }
       shade(g, B, 0.6); g.restore();
     } },
+    mirror: { pad: 1.35, paint(g, B, rnd) { // Paralleluniversum: Glaskugel mit einer Galaxie darin
+      glow(g, B * 1.35, 'rgba(150,120,255,.4)');
+      ball(g, B, [[0, 'rgba(120,100,220,.55)'], [0.7, 'rgba(40,24,110,.8)'], [1, 'rgba(14,8,48,.92)']]);
+      g.save(); g.beginPath(); g.arc(0, 0, B * 0.96, 0, TAU); g.clip(); g.globalCompositeOperation = 'lighter';
+      g.save(); g.rotate(0.5); g.scale(1, 0.55);
+      for (let arm = 0; arm < 2; arm++) for (let i = 0; i < 50; i++) {
+        const f = i / 50, a = arm * Math.PI + f * 4, d = B * (0.08 + f * 0.68), x = Math.cos(a) * d, y = Math.sin(a) * d, r = B * 0.11;
+        const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(210,200,255,${(0.5 * (1 - f * 0.6)).toFixed(2)})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+      }
+      g.restore(); glow(g, B * 0.28, 'rgba(255,235,200,.95)'); g.restore();
+      g.strokeStyle = 'rgba(220,210,255,.75)'; g.lineWidth = B * 0.05; g.beginPath(); g.arc(0, 0, B * 0.97, 0, TAU); g.stroke();
+      g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = B * 0.07; g.lineCap = 'round'; g.beginPath(); g.arc(0, 0, B * 0.78, Math.PI * 1.12, Math.PI * 1.42); g.stroke();
+    } },
+    multi: { pad: 1.3, paint(g, B, rnd) { // Multiversum: Schaum aus Blasen
+      glow(g, B * 1.3, 'rgba(255,140,230,.28)');
+      const bub = [[0, 0, 0.55], [-0.55, -0.3, 0.36], [0.5, -0.42, 0.33], [0.52, 0.38, 0.38], [-0.4, 0.52, 0.33], [-0.02, -0.72, 0.24], [0.05, 0.78, 0.2]];
+      bub.forEach(([x, y, r], i) => {
+        const h = 280 + i * 22;
+        g.save(); g.translate(x * B, y * B);
+        const gr = g.createRadialGradient(-r * B * 0.3, -r * B * 0.3, 0, 0, 0, r * B);
+        gr.addColorStop(0, `hsla(${h},90%,80%,.5)`); gr.addColorStop(0.75, `hsla(${h},80%,45%,.3)`); gr.addColorStop(1, `hsla(${h},90%,75%,.75)`);
+        g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r * B, 0, TAU); g.fill();
+        g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(-r * B * 0.35, -r * B * 0.38, r * B * 0.13, 0, TAU); g.fill();
+        g.restore();
+      });
+    } },
+    grid: { pad: 1.3, spin: true, paint(g, B) { // Raumzeit: zum Zentrum hin verzogenes Gitter
+      glow(g, B * 1.3, 'rgba(90,170,255,.3)');
+      g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+      const warp = (x, y) => { const d = Math.hypot(x, y) + 0.001, f = 1 - 0.42 * Math.exp(-d * d * 3.2); return [x * f * B, y * f * B]; };
+      for (let k = -4; k <= 4; k++) for (const horiz of [0, 1]) {
+        g.beginPath();
+        for (let t = -20; t <= 20; t++) { const a = t / 20, b = k / 4, [x, y] = horiz ? warp(a, b) : warp(b, a); if (t === -20) g.moveTo(x, y); else g.lineTo(x, y); }
+        g.strokeStyle = `rgba(140,205,255,${(0.75 - Math.abs(k) * 0.14).toFixed(2)})`; g.lineWidth = B * 0.035; g.stroke();
+      }
+      g.globalCompositeOperation = 'destination-in';
+      const m = g.createRadialGradient(0, 0, B * 0.3, 0, 0, B * 1.05); m.addColorStop(0, '#000'); m.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = m; g.fillRect(-B * 1.3, -B * 1.3, B * 2.6, B * 2.6);
+      g.globalCompositeOperation = 'source-over';
+      glow(g, B * 0.2, 'rgba(255,255,255,.9)');
+    } },
+    void: { pad: 1.7, paint(g, B) { // Das Nichts: dunkler als der Himmel, mit kaltem Rand
+      glow(g, B * 1.7, 'rgba(170,110,255,.38)');
+      g.fillStyle = '#020108'; g.beginPath(); g.arc(0, 0, B, 0, TAU); g.fill();
+      const gr = g.createRadialGradient(0, 0, B * 0.55, 0, 0, B); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(150,100,255,.4)');
+      g.fillStyle = gr; g.beginPath(); g.arc(0, 0, B, 0, TAU); g.fill();
+      g.strokeStyle = 'rgba(215,190,255,.9)'; g.lineWidth = B * 0.05; g.beginPath(); g.arc(0, 0, B * 0.98, 0, TAU); g.stroke();
+      g.strokeStyle = 'rgba(190,150,255,.35)'; g.lineWidth = B * 0.03; g.beginPath(); g.arc(0, 0, B * 0.62, 0, TAU); g.stroke();
+    } },
     mini: { pad: 2.4, paint(g, B) { // kleines rivalisierendes Schwarzes Loch
       glow(g, B * 2.4, 'rgba(190,90,255,.45)');
       g.save(); g.rotate(0.3); g.scale(1, 0.3);
@@ -626,18 +778,21 @@ const FX = (() => {
 
   /* ---------- Orbit: gekaufte Himmelskörper kreisen auf verschieden geneigten Bahnen ---------- */
   const ORB = GENS.map((g, i) => ({
-    tilt: [-0.30, 0.20, -0.12, 0.30, -0.22, 0.08, 0.26, -0.27, 0.13, -0.05, 0.22, -0.17][i] ?? 0,
-    fl: [0.22, 0.30, 0.25, 0.34, 0.22, 0.30, 0.26, 0.36, 0.22, 0.32, 0.25, 0.30][i] ?? 0.28,
+    tilt: [-0.30, 0.20, -0.12, 0.30, -0.22, 0.08, 0.26, -0.27, 0.13, -0.05, 0.22, -0.17, 0.28, -0.24, 0.1, -0.08][i] ?? 0,
+    fl: [0.22, 0.30, 0.25, 0.34, 0.22, 0.30, 0.26, 0.36, 0.22, 0.32, 0.25, 0.30, 0.24, 0.33, 0.27, 0.35][i] ?? 0.28,
     rf: 0.6 + 0.4 * i / Math.max(1, GENS.length - 1),
     sp: 0.55 / (1 + i * 0.2),
     ph: i * 1.7,
-    size: [12, 17, 10, 13, 15, 20, 14, 10, 23, 20, 22, 23][i] ?? 15,
+    size: [12, 17, 10, 13, 15, 20, 14, 10, 23, 20, 22, 23, 19, 22, 22, 18][i] ?? 15,
   }));
   let counts = GENS.map(() => 0), prods = GENS.map(() => 0);
   const P = { x: 0, y: 0, z: 0 };
-  const visN = c => c > 0 ? Math.min(6, 1 + Math.floor(Math.log2(c))) : 0;
+  // je mehr Arten kreisen, desto weniger Exemplare pro Art – sonst wird es ein Gewimmel
+  let visCap = 6;
+  const visN = c => c > 0 ? Math.min(visCap, 1 + Math.floor(Math.log2(c))) : 0;
+  const flat = o => o.fl * hole.k / 0.23;
   function orbitPos(i, j, n) {
-    const o = ORB[i], rx = hole.orbitR * o.rf, ry = rx * o.fl;
+    const o = ORB[i], rx = hole.orbitR * o.rf, ry = rx * flat(o);
     const a = clock * o.sp + j * TAU / n + o.ph;
     const ex = Math.cos(a) * rx, ey = Math.sin(a) * ry, cs = Math.cos(o.tilt), sn = Math.sin(o.tilt);
     P.x = hole.x + ex * cs - ey * sn; P.y = hole.y + ex * sn + ey * cs; P.z = Math.sin(a);
@@ -649,7 +804,7 @@ const FX = (() => {
       if (!counts[i]) continue;
       const o = ORB[i], rx = hole.orbitR * o.rf;
       ctx.strokeStyle = `hsla(${GENS[i].hue},80%,75%,.06)`;
-      ctx.beginPath(); ctx.ellipse(hole.x, hole.y, rx, rx * o.fl, o.tilt, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(hole.x, hole.y, rx, rx * flat(o), o.tilt, 0, TAU); ctx.stroke();
     }
   }
   function drawOrbit(front) {
@@ -659,6 +814,11 @@ const FX = (() => {
         orbitPos(i, j, n);
         if ((P.z > 0) !== front) continue;
         const d = (P.z + 1) / 2;
+        if (!RM) { // Leuchtspur entlang der Bahn
+          const o = ORB[i], rx = hole.orbitR * o.rf, a = clock * o.sp + j * TAU / n + o.ph;
+          ctx.globalAlpha = (front ? 0.3 : 0.14) * (0.5 + 0.5 * d); ctx.strokeStyle = `hsl(${GENS[i].hue},90%,78%)`; ctx.lineWidth = Math.max(1, o.size * 0.13); ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.ellipse(hole.x, hole.y, rx, rx * flat(o), o.tilt, a - 0.34, a); ctx.stroke();
+        }
         drawSprite(ctx, GENS[i].spr, P.x, P.y, ORB[i].size * (0.7 + 0.4 * d), clock * 0.6 + j * 2 + i, j % 3, front ? 1 : 0.4 + 0.45 * d);
       }
     }
@@ -881,6 +1041,7 @@ const FX = (() => {
 
     const ease = Math.min(1, dtRaw * 4);
     hole.R += (hole.Rt - hole.R) * Math.min(1, dtRaw * 2.2);
+    hole.k += (hole.kT - hole.k) * Math.min(1, dtRaw * 3);
     hole.hue += (hole.hueT - hole.hue) * Math.min(1, dtRaw * 1.2);
     hole.sat += (hole.satT - hole.sat) * Math.min(1, dtRaw * 1.2);
     hole.rausch += (hole.rauschT - hole.rausch) * ease;
@@ -923,19 +1084,26 @@ const FX = (() => {
       if (amp > 0.05) { ox = (Math.random() - 0.5) * 2 * amp; oy = (Math.random() - 0.5) * 2 * amp; }
     }
     ctx.save(); ctx.translate(ox, oy);
-    composeDisk();
+    const useGL = glOn && GLH.ok;
+    if (!useGL) composeDisk();
     drawGlow(R);
     drawOrbitLines();
     drawOrbit(false);
     drawSpirals(false);
-    // Helligkeit über mehrere additive Durchgänge (Fressrausch & Füttern machen die Scheibe heißer)
+    // Helligkeit: Fressrausch & Füttern machen die Scheibe heißer
     const bright = 1.55 + 0.45 * hole.rausch + 0.4 * Math.min(1, hole.feed);
     diskGlow(R, 1 + 0.5 * hole.rausch + 0.4 * Math.min(1, hole.feed));
-    passes(a => diskHalf(R, false, a), bright);
-    passes(a => drawHalo(R, a), bright * 0.85);
-    drawShadow(R);
-    drawJets(R, hole.jet);
-    passes(a => diskHalf(R, true, a), bright);
+    if (useGL) {
+      drawJets(R, hole.jet);
+      const S = GLH.render(R, bright / 1.55);
+      ctx.drawImage(GLH.cnv, hole.x - S / 2, hole.y - S / 2, S, S);
+    } else {
+      passes(a => diskHalf(R, false, a), bright);
+      passes(a => drawHalo(R, a), bright * 0.85);
+      drawShadow(R);
+      drawJets(R, hole.jet);
+      passes(a => diskHalf(R, true, a), bright);
+    }
     drawOrbit(true);
     drawSpirals(true);
     drawPulls();
@@ -1093,7 +1261,7 @@ const FX = (() => {
   return {
     hole, resize, layout, draw, burst, float, wave, pull, devour, shake, sprite, setStage,
     tap(x, y, text, kind) {
-      if (kind === 'auto' || kind === 'autocrit') { float(x, y, text, kind === 'autocrit' ? 'minigold' : 'mini'); pull(x, y, 2, hole.hue + 20, 14); return; }
+      if (kind === 'auto' || kind === 'autocrit') { if (Math.random() < 0.3) float(x, y, text, kind === 'autocrit' ? 'minigold' : 'mini'); pull(x, y, 2, hole.hue + 20, 14); return; }
       float(x, y, text, kind === 'crit' ? 'crit' : 'tap');
       pull(x, y, kind === 'crit' ? 12 : 6, hole.hue + 20);
       hole.gulp = Math.max(hole.gulp, kind === 'crit' ? 1 : 0.6);
@@ -1109,7 +1277,8 @@ const FX = (() => {
     feed(a) { hole.feed = Math.min(1.6, hole.feed + a); hole.gulp = 1; },
     flash(a, col = '#fff6e6') { flashA = Math.max(flashA, a); flashCol = col; },
     setMode(k, v) { hole[k + 'T'] = v; },
-    setOrbit(gens, pr) { counts = gens.slice(); if (pr) prods = pr.slice(); },
+    setOrbit(gens, pr) { counts = gens.slice(); if (pr) prods = pr.slice(); const m = counts.filter(c => c > 0).length; visCap = m > 12 ? 3 : m > 8 ? 4 : m > 5 ? 5 : 6; },
+    setGL(on) { glOn = on; },
     setPrey(list) { preyList = list; },
     setBoss(b) { boss = b; },
     setRival(r) { rival = r; },

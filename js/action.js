@@ -1,5 +1,5 @@
-'use strict';
-/* Sternenstaub – Action: Beute, kritische Treffer, Fressrausch, Ereignisse, Fähigkeiten, Kapseln & Tagesbeute
+﻿'use strict';
+/* Singularität – Action: Beute, kritische Treffer, Fressrausch, Ereignisse, Fähigkeiten, Kapseln & Tagesbeute
    Nutzt Spielstand (S, D) und Hilfen (earn, rate, toast, modal …) aus game.js – aufgerufen wird erst nach dem Laden. */
 
 const ACT = (() => {
@@ -10,7 +10,7 @@ const ACT = (() => {
   let nextPrey = 0, nextEvent = 0, nextCap = 0, lastTap = 0, pendingRausch = false, dailyShown = -1, cracking = false;
   const RZ = { m: 0, until: 0, lock: 0, dur: 10 };
   const active = { sog: 0, jet: 0 };
-  const acc = { sog: 0, cat: 0 };
+  const acc = { sog: 0, cat: 0, arm: 0 };
   const AB = Object.fromEntries(ABILITIES.map(a => [a.id, a]));
   const AB_ICO = { sog: '🌀', jet: '⚡', zeit: '⏳' };
   const GOLD = { spr: 'gold', size: [15, 17], hue: 45, tail: 'rgba(255,200,100,1)', fast: 1.15 };
@@ -77,7 +77,7 @@ const ACT = (() => {
     checkAch();
   }
   function endRausch(now) {
-    RZ.until = 0; RZ.lock = now + 2500;
+    RZ.until = 0; RZ.lock = now + 6000; // erst verdauen
     FX.setMode('rausch', 0); document.body.classList.remove('rausch'); SND.rauschEnd();
   }
 
@@ -135,7 +135,8 @@ const ACT = (() => {
     const st = stage();
     return pick(Object.entries(PREY).filter(([, d]) => st >= d.stage).map(([k, d]) => ({ k, w: d.w }))).k;
   }
-  function rollRarity() { const r = Math.random(); return r < 0.01 ? 'l' : r < 0.1 ? 'e' : r < 0.38 ? 'r' : 'c'; }
+  // Labor „Glückssträhne“ verschiebt die Chancen nach oben
+  function rollRarity() { const r = Math.random() / (1 + (D.luck || 0)); return r < 0.01 ? 'l' : r < 0.1 ? 'e' : r < 0.38 ? 'r' : 'c'; }
   function schedPrey(now) { nextPrey = now + rand(3.5, 7) * 1000 / D.preyFreq / (rauschOn(now) ? 3 : 1); }
 
   function updatePrey(dt) {
@@ -261,12 +262,12 @@ const ACT = (() => {
     if (boss.hp <= 0) bossDown();
   }
   function bossDown() {
-    const b = boss, st = stage(), g = Math.max(baseRate() * buffMult('prod') * 90, tapBase() * 80) * (1 + 0.15 * st) * rauschMult();
+    const b = boss, st = stage(), g = Math.max(baseRate() * buffMult('prod') * 60, tapBase() * 80) * (1 + 0.1 * st) * rauschMult();
     boss = null; FX.setBoss(null); ev = null; S.bosses++;
     earn(g);
     FX.devour({ spr: b.spr, x: b.x, y: b.y, size: b.size, hue: b.hue, big: true,
       cb: () => { FX.float(FX.hole.x, FX.hole.y - FX.hole.R * 2.2, '+' + fmt(g), 'big'); FX.toCounter(FX.hole.x, FX.hole.y, 8); } });
-    const r = st >= 4 ? 'e' : 'r';
+    const r = rollRarity();
     give(r, 1); SND.devour(true); SND.win(); HAP.burst(4, 80);
     toast(`${b.ico} <b>${b.name} verschlungen!</b><small>+${fmt(g)} Masse · +1 ${RARITY[r].adj} Kapsel</small>`);
     schedEvent(Date.now()); checkAch(); save();
@@ -314,12 +315,12 @@ const ACT = (() => {
     if (rival.hp <= 0) rivalDown();
   }
   function rivalDown() {
-    const rv = rival, g = rv.stolen * 2 + Math.max(baseRate() * buffMult('prod') * 60, tapBase() * 50) * rauschMult();
+    const rv = rival, g = rv.stolen * 2 + Math.max(baseRate() * buffMult('prod') * 45, tapBase() * 50) * rauschMult();
     rival = null; FX.setRival(null); ev = null; S.rivals++;
     earn(g);
     FX.devour({ spr: 'mini', x: rv.x, y: rv.y, size: rv.r * 2, hue: 290, big: true,
       cb: () => { FX.float(FX.hole.x, FX.hole.y - FX.hole.R * 2.2, '+' + fmt(g), 'big'); FX.toCounter(FX.hole.x, FX.hole.y, 8); FX.flash(0.3, 'hsl(290,100%,82%)'); } });
-    const r = Math.random() < 0.25 ? 'e' : 'r';
+    const r = rollRarity();
     give(r, 1); SND.devour(true); SND.win(); HAP.burst(4, 80);
     toast(`⚫ <b>Rivale verschlungen!</b><small>+${fmt(g)} Masse · +1 ${RARITY[r].adj} Kapsel</small>`);
     schedEvent(Date.now()); checkAch(); save();
@@ -331,7 +332,7 @@ const ACT = (() => {
     if (!a || S.stageBest < a.stage) return;
     const readyAt = S.ab[id] || 0;
     if (now < readyAt) { toast(`${AB_ICO[id]} <b>${a.name}</b><small>lädt noch · ${fmtClock((readyAt - now) / 1000)}</small>`); HAP.fire(true); return; }
-    S.ab[id] = now + a.cd * D.abCd * 1000;
+    S.ab[id] = now + a.cd * D.abCd * 1000; S.abUsed++;
     SND.ability(); HAP.burst(2, 70);
     if (id === 'sog') {
       active.sog = now + (a.dur + D.sogDur) * 1000; acc.sog = 0; acc.cat = 0; FX.setMode('sog', 1);
@@ -340,10 +341,10 @@ const ACT = (() => {
       active.jet = now + (a.dur + D.jetDur) * 1000; FX.setMode('jet', 1); FX.flash(0.2, 'hsl(205,100%,85%)');
       toast('⚡ <b>Jet!</b><small>Jeder Tipp ist jetzt kritisch</small>');
     } else if (id === 'zeit') {
-      const g = Math.max(baseRate() * buffMult('prod') * 3600, tapBase() * 600) * D.zeitMult;
+      const g = Math.max(baseRate() * buffMult('prod') * 1800, tapBase() * 300) * D.zeitMult;
       SND.warp();
       FX.timeWarp(() => { earn(g); FX.float(FX.hole.x, FX.hole.y - FX.hole.R * 2.2, '+' + fmt(g), 'big'); FX.toCounter(FX.hole.x, FX.hole.y, 10); save(); });
-      toast(`⏳ <b>Zeitdehnung</b><small>${D.zeitMult > 1 ? 'Zwei Stunden vergehen' : 'Eine Stunde vergeht'} in einem Augenblick</small>`);
+      toast(`⏳ <b>Zeitdehnung</b><small>${D.zeitMult > 1 ? 'Eine Stunde vergeht' : '30 Minuten vergehen'} in einem Augenblick</small>`);
     }
     save();
   }
@@ -429,7 +430,7 @@ const ACT = (() => {
     }
     if (id === 'rausch') return { ico: '🔥', hue: 330, title: 'Fressrausch', sub: 'startet gleich nach dem Öffnen', apply: () => { pendingRausch = true; } };
     if (id === 'charge') return { ico: '⏱️', hue: 190, title: 'Fähigkeiten aufgeladen', sub: 'sofort wieder einsatzbereit', apply: () => { S.ab = {}; } };
-    if (id === 'dm') { const n = r === 'l' ? 2 : 1; return { ico: '💠', hue: 280, title: `+${n} Dunkle Materie`, sub: `+${n * 2} % Produktion für immer`, apply: () => { S.cores += n; } }; }
+    if (id === 'dm') { const n = r === 'l' ? 2 : 1; return { ico: '💠', hue: 280, title: `+${n} Dunkle Materie`, sub: `+${n} % Produktion für immer, auch fürs Labor`, apply: () => { S.cores += n; S.dm += n; } }; }
     return null;
   }
   function rollLoot(r) {
@@ -471,12 +472,55 @@ const ACT = (() => {
     });
   }
 
+  /* ======================= Tagesziele ======================= */
+  function ensureQuests() {
+    const today = dayNum();
+    if (S.quest.day === today && S.quest.list.length === 3) return;
+    const pool = QUESTS.filter(q => q.stage == null || S.stageBest >= q.stage).sort(() => Math.random() - 0.5).slice(0, 3);
+    S.quest = { day: today, bonus: false, list: pool.map((q, i) => ({ stat: q.stat, need: q.n[i], base: S[q.stat] || 0, got: false })) };
+  }
+  const qDef = q => QUESTS.find(d => d.stat === q.stat);
+  const qProg = q => Math.min(q.need, Math.max(0, (S[q.stat] || 0) - q.base));
+  function questClaimable() { ensureQuests(); return S.quest.list.some(q => !q.got && qProg(q) >= q.need); }
+  function questKey() { ensureQuests(); return S.quest.day + S.quest.list.map(q => (q.got ? 'x' : qProg(q) >= q.need ? 'r' : 'o')).join('') + S.quest.bonus; }
+  function questCard() {
+    ensureQuests();
+    const rows = S.quest.list.map((q, i) => {
+      const ready = qProg(q) >= q.need, r = RARITY[QUEST_REWARD[i]];
+      return `<div class="quest ${q.got ? 'got' : ready ? 'ready' : ''}" data-q="${i}"><div class="qi"><b>${qDef(q).text(q.need)}</b>
+        <div class="bar"><i></i></div><small></small></div>
+        ${q.got ? '<div class="chk">✓</div>' : `<button class="qb" data-act="quest" data-i="${i}" ${ready ? '' : 'disabled'}><img src="${capImg(QUEST_REWARD[i], 48)}" alt="${r.name}"></button>`}</div>`;
+    }).join('');
+    const all = S.quest.list.every(q => q.got);
+    return `<div class="card"><h3>🎯 Tagesziele <small class="hs">neu um Mitternacht</small></h3>${rows}
+      <p class="note" style="margin-top:8px">${all ? 'Alle geschafft – morgen gibt es neue Ziele.' : 'Schaffst du alle drei, gibt es zusätzlich eine <b>epische Kapsel</b>.'}</p></div>`;
+  }
+  function questUpdate() {
+    for (const n of el.list.querySelectorAll('.quest')) {
+      const q = S.quest.list[+n.dataset.q]; if (!q) continue;
+      const p = q.got ? q.need : qProg(q);
+      setScale(n.querySelector('.bar i'), p / q.need);
+      put(n.querySelector('small'), `${fmt(p)} / ${fmt(q.need)}`);
+    }
+  }
+  function claimQuest(i) {
+    const q = S.quest.list[i];
+    if (!q || q.got || qProg(q) < q.need) return;
+    q.got = true; S.questsDone++;
+    const r = QUEST_REWARD[i]; give(r, 1);
+    let txt = `+1 ${RARITY[r].adj} Kapsel`;
+    if (!S.quest.bonus && S.quest.list.every(x => x.got)) { S.quest.bonus = true; give('e', 1); txt += ' · +1 epische Kapsel für alle drei'; }
+    SND.chest(r); HAP.burst(2);
+    toast(`🎯 <b>Tagesziel geschafft</b><small>${txt}</small>`);
+    listKey = ''; renderList(); checkAch(); save();
+  }
+
   /* ======================= Wachstum ======================= */
   function stageUp(st) {
     FX.stageUp(); SND.stageUp(); HAP.burst(4, 90);
     const r = st <= 2 ? 'c' : st <= 4 ? 'r' : st <= 6 ? 'e' : 'l';
     give(r, 1);
-    toast(`🕳️ <b>Gewachsen: ${STAGES[st].name}</b><small>+1 ${RARITY[r].adj} Kapsel</small>`);
+    toast(`🕳️ <b>${STAGES[st].name}</b><small>gewachsen · +1 Kapsel</small>`);
     const neu = ABILITIES.filter(a => a.stage <= st && !S.tips['ab_' + a.id]);
     if (neu.length) {
       neu.forEach(a => { S.tips['ab_' + a.id] = 1; });
@@ -505,6 +549,8 @@ const ACT = (() => {
       }
     }
     if (active.jet && now >= active.jet) { active.jet = 0; FX.setMode('jet', 0); }
+    // Labor „Fangarme“: fängt Beute von selbst
+    if (D.autoCatch) { acc.arm += dt; if (acc.arm >= D.autoCatch) { const p = prey.find(q => q.x > 20 && q.x < innerWidth - 20); if (p) { acc.arm = 0; catchPrey(p, true); } } }
 
     const free = el.modal.hidden && !document.hidden;
     if (free && now >= nextPrey) {
@@ -573,6 +619,7 @@ const ACT = (() => {
 
   return {
     init, reset, update, ui, stageTap, hit, rauschMult, critChance, stageUp, checkDaily, give, openCaps, renderCapBtn, capImg,
+    questCard, questUpdate, questKey, questClaimable, claimQuest,
     // für Tests & Fehlersuche
     _dbg: { prey, spawnPrey, startEvent, startRausch: () => startRausch(Date.now()), useAbility, get boss() { return boss; }, get rival() { return rival; }, get ev() { return ev; }, RZ, active },
   };

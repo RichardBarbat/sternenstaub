@@ -1,12 +1,13 @@
 'use strict';
-/* Sternenstaub – Spielstand, Wirtschaft, Oberfläche & Spielschleife */
+/* Singularität – Spielstand, Wirtschaft, Oberfläche & Spielschleife */
 
-const SAVE_KEY = 'sternenstaub-v2';
-const VERSION = '2.0';
+const SAVE_KEY = 'sternenstaub-v3'; // Adresse & Schlüssel behalten den alten Projektnamen
+const NAME = 'Singularität';
+const VERSION = '3.0';
 const $ = s => document.querySelector(s);
 const el = {
   dust: $('#dust'), rate: $('#rate'), tapv: $('#tapv'), buffs: $('#buffs'), stage: $('#stage'), hint: $('#hint'),
-  list: $('#list'), title: $('#ptitle'), seg: $('#seg'), tabs: $('#tabs'), dotUp: $('#dotUp'), dotNova: $('#dotNova'),
+  list: $('#list'), title: $('#ptitle'), seg: $('#seg'), tabs: $('#tabs'), dotUp: $('#dotUp'), dotNova: $('#dotNova'), dotAch: $('#dotAch'),
   toasts: $('#toasts'), modal: $('#modal'), sheet: $('#sheet'),
   hunger: $('#hunger'), hungerFill: $('#hungerFill'), hungerTxt: $('#hungerTxt'),
   abil: $('#abil'), capBtn: $('#capBtn'), capN: $('#capN'), capImg: $('#capImg'),
@@ -18,13 +19,14 @@ const STANDALONE = navigator.standalone === true || (window.matchMedia && matchM
 function fresh() {
   const t = Date.now();
   return {
-    v: 2, dust: 0, runEarned: 0, totalEarned: 0, taps: 0, tapEarned: 0,
+    v: 3, dust: 0, runEarned: 0, totalEarned: 0, taps: 0, tapEarned: 0,
     gens: GENS.map(() => 0), ups: {}, ach: {}, cores: 0, novas: 0, starsCaught: 0, buffs: [],
-    prey: 0, crits: 0, frenzies: 0, bosses: 0, rivals: 0, swarms: 0, capsOpened: 0,
+    prey: 0, crits: 0, frenzies: 0, bosses: 0, rivals: 0, swarms: 0, capsOpened: 0, bought: 0, abUsed: 0, questsDone: 0,
+    dm: 0, lab: {}, quest: { day: -1, list: [], bonus: false },
     caps: { c: 0, r: 0, e: 0, l: 0 }, daily: { last: -1, streak: 0, total: 0 }, ab: {}, tips: {},
     stageRun: 0, stageBest: 0,
     last: t, created: t, runStart: t, played: 0, nextStar: t + 40000, buyAmt: 1,
-    set: { sound: true, haptic: true, shake: true, sci: false },
+    set: { sound: true, haptic: true, shake: true, sci: false, auto: true, gl: true },
   };
 }
 function migrate(o) {
@@ -32,7 +34,8 @@ function migrate(o) {
   s.set = Object.assign(fresh().set, o.set || {});
   s.caps = Object.assign(fresh().caps, o.caps || {});
   s.daily = Object.assign(fresh().daily, o.daily || {});
-  s.ab = o.ab || {}; s.tips = o.tips || {};
+  s.ab = o.ab || {}; s.tips = o.tips || {}; s.lab = o.lab || {};
+  s.quest = Object.assign(fresh().quest, o.quest || {});
   s.gens = GENS.map((_, i) => (o.gens && +o.gens[i]) || 0);
   s.ups = o.ups || {}; s.ach = o.ach || {};
   s.buffs = Array.isArray(o.buffs) ? o.buffs : [];
@@ -56,7 +59,12 @@ function recalc() {
   for (const u of UPGRADES) if (S.ups[u.id]) apply(u);
   for (const m of MILESTONES) if (S.cores >= m.cores) apply(m);
   D.achCount = Object.keys(S.ach).length;
-  D.global *= (1 + 0.02 * S.cores) * (1 + 0.01 * D.achCount);
+  // Labor (dauerhafte Forschung)
+  const L = k => S.lab[k] || 0;
+  D.global *= Math.pow(KRAFT, L('kraft')) * (1 + CORE_BONUS * S.cores) * (1 + 0.01 * D.achCount);
+  D.preyMult *= 1 + BEUTE * L('beute'); D.tapPct += 0.005 * L('griff'); D.critChance += 0.01 * L('krit'); D.rauschDur += L('rausch');
+  D.offCap += 4 * L('offline'); D.offEff += 0.05 * L('offline'); D.abCd *= Math.pow(0.9, L('tempo'));
+  D.autoCatch = AUTO_CATCH[L('auto')] || 0; D.luck = 0.15 * L('gluck'); D.autoBuy = L('kauf');
   D.offEff = Math.min(1, D.offEff);
 }
 function apply(u) {
@@ -74,7 +82,7 @@ function apply(u) {
   if (e.autoTap) D.autoTap += e.autoTap;
   if (e.preyMult) D.preyMult *= e.preyMult;
   if (e.critChance) D.critChance += e.critChance;
-  if (e.critMult) D.critMult *= e.critMult;
+  if (e.critSet) D.critMult = Math.max(D.critMult, e.critSet);
   if (e.rauschGain) D.rauschGain *= e.rauschGain;
   if (e.rauschDur) D.rauschDur += e.rauschDur;
   if (e.rauschMult) D.rauschMult = Math.max(D.rauschMult, e.rauschMult);
@@ -118,14 +126,15 @@ function buyCount(i) {
   return a > 0 ? a : 1;
 }
 
-const coreTotal = e => Math.floor(Math.sqrt(e / 1e8));
+const coreTotal = coresFor;
 const coreGain = () => Math.max(0, coreTotal(S.totalEarned) - S.cores);
+const startMass = () => (S.lab.start ? Math.pow(10, 1 + 2 * S.lab.start) : 0);
 
 /* ======================= Käufe ======================= */
 function buyGen(i, row) {
   const n = buyCount(i), c = costOf(i, n);
   if (!canPay(c)) return nope(row);
-  pay(c); S.gens[i] += n;
+  pay(c); S.gens[i] += n; S.bought += n;
   syncOrbit();
   SND.buy(); HAP.fire(true); flash(row); burstAt(row);
   if (!S.tips.orbit) { S.tips.orbit = 1; toast(`${GENS[i].ico} <b>${GENS[i].name} im Orbit!</b><small>Füttert dich ab jetzt von selbst</small>`); }
@@ -140,6 +149,30 @@ function buyUp(id, row) {
   recalc(); syncOrbit();
   SND.up(); HAP.fire(true); burstAt(row);
   renderList(); save();
+}
+
+function buyLab(id, row) {
+  const x = LAB_BY_ID[id], l = S.lab[id] || 0;
+  if (!x || l >= x.max) return;
+  const c = labCost(x, l);
+  if (S.dm < c) return nope(row);
+  S.dm -= c; S.lab[id] = l + 1;
+  recalc(); syncOrbit();
+  SND.up(); HAP.fire(true); burstAt(row);
+  listKey = ''; renderList(); save();
+}
+
+// Labor „Selbstorganisation“: kauft das, was sich am schnellsten bezahlt macht
+function autoBuy() {
+  if (!D.autoBuy || !S.set.auto) return;
+  if (D.autoBuy >= 2) for (const u of visibleUps()) { if (!canPay(u.cost)) break; pay(u.cost); S.ups[u.id] = 1; recalc(); }
+  let best = -1, bp = Infinity;
+  const n = revealed();
+  for (let i = 0; i < n; i++) { const p = unitCost(i) / genRate(i); if (p < bp) { bp = p; best = i; } }
+  if (best < 0) return;
+  let k = 0;
+  while (k < 25 && canPay(costOf(best, 1))) { pay(costOf(best, 1)); S.gens[best]++; S.bought++; k++; }
+  if (k) syncOrbit();
 }
 
 function nope(row) {
@@ -180,7 +213,7 @@ function confirmNova() {
   modal(`<div class="em">💥</div><h3>Urknall auslösen?</h3>
     <p>Dein Universum stürzt in sich zusammen und beginnt neu. Masse, Orbit und Upgrades gehen verloren – dafür bekommst du</p>
     <div class="big">+${fmt(g)} 💠</div>
-    <p>Danach: <b>+${fmt((S.cores + g) * 2)} %</b> Produktion für immer.</p>
+    <p>Danach: <b>+${fmt((S.cores + g) * CORE_BONUS * 100)} %</b> Produktion für immer – und ${fmt(S.dm + g)} zum Forschen im Labor.</p>
     <button class="btn" data-m="go">Ja, Urknall!</button>
     <button class="btn ghost" data-m="close">Noch nicht</button>`, k => { if (k === 'go') { closeModal(); doNova(); } });
 }
@@ -192,14 +225,16 @@ function doNova() {
     starsCaught: S.starsCaught, created: S.created, played: S.played, set: S.set, buyAmt: S.buyAmt,
     prey: S.prey, crits: S.crits, frenzies: S.frenzies, bosses: S.bosses, rivals: S.rivals, swarms: S.swarms, capsOpened: S.capsOpened,
     caps: S.caps, daily: S.daily, ab: S.ab, tips: S.tips, stageBest: S.stageBest,
+    bought: S.bought, abUsed: S.abUsed, questsDone: S.questsDone, quest: S.quest, dm: S.dm + g, lab: S.lab,
   };
   S = Object.assign(fresh(), keep);
+  S.dust = startMass();
   recalc();
   if (MILESTONES.some(m => m.start && S.cores >= m.cores)) { S.gens[0] = 10; S.gens[1] = 5; }
   ACT.reset();
   FX.bigBang(); syncOrbit(); FX.setStage(0); SND.nova(); HAP.burst(4, 90);
   listKey = ''; renderList(); renderBuffs(); save();
-  setTimeout(() => toast(`💠 <b>Urknall!</b><small>Du besitzt jetzt ${fmt(S.cores)} Dunkle Materie.</small>`), 900);
+  setTimeout(() => toast(`💠 <b>Urknall!</b><small>${fmt(S.dm)} Dunkle Materie fürs Labor</small>`), 900);
   checkAch();
 }
 
@@ -247,7 +282,7 @@ function afterStateChange() {
 
 function toggleSet(k) { S.set[k] = !S.set[k]; applySettings(); listKey = ''; renderList(); save(); }
 function applySettings() {
-  SND.setOn(S.set.sound); HAP.setOn(S.set.haptic); FX.setShake(S.set.shake); NUM.sci = S.set.sci;
+  SND.setOn(S.set.sound); HAP.setOn(S.set.haptic); FX.setShake(S.set.shake); FX.setGL(S.set.gl !== false); NUM.sci = S.set.sci;
   hudCache.d = hudCache.r = hudCache.t = '';
 }
 
@@ -306,7 +341,7 @@ function renderBuffs() {
 
 /* ---------- Listen ---------- */
 let tab = 'gens', listKey = '';
-const TITLES = { gens: 'Orbit', ups: 'Upgrades', ach: 'Erfolge', nova: 'Urknall', more: 'Mehr' };
+const TITLES = { gens: 'Orbit', ups: 'Upgrades', ach: 'Ziele', nova: 'Urknall', more: 'Mehr' };
 const BUILD = {}, UPDATE = {}, KEY = {};
 
 function revealed() { let n = 1; GENS.forEach((g, i) => { if (S.gens[i] > 0 || S.runEarned >= g.cost * 0.3) n = i + 1; }); return n; }
@@ -371,10 +406,10 @@ UPDATE.ups = () => {
 };
 
 // Erfolge
-KEY.ach = () => D.achCount + '|' + NUM.sci;
+KEY.ach = () => D.achCount + '|' + NUM.sci + '|' + ACT.questKey();
 BUILD.ach = () => {
   const n = D.achCount;
-  let h = `<div class="card hero"><div class="big">🏆 ${n} / ${ACH.length}</div>
+  let h = ACT.questCard() + `<div class="card hero"><div class="big">🏆 ${n} / ${ACH.length}</div>
     <p>Jeder Erfolg erhöht deine Produktion dauerhaft um 1 % – aktuell <b>+${n} %</b>.</p></div>`;
   for (const a of ACH) {
     const d = !!S.ach[a.id];
@@ -383,19 +418,29 @@ BUILD.ach = () => {
   }
   return h;
 };
-UPDATE.ach = () => {};
+UPDATE.ach = () => ACT.questUpdate();
 
 // Urknall
-KEY.nova = () => S.cores + '|' + S.novas + '|' + NUM.sci;
+KEY.nova = () => S.cores + '|' + S.novas + '|' + NUM.sci + '|' + S.dm + '|' + JSON.stringify(S.lab);
 BUILD.nova = () => {
   let h = `<div class="card hero"><p style="margin:0">Ein Urknall bringt dir jetzt</p><div class="big" data-f="gain"></div>
     <button class="btn" data-act="nova" data-f="btn">💥 Urknall auslösen</button>
     <div class="bar"><i data-f="bar"></i></div><p data-f="next"></p></div>
     <div class="card"><h3>💠 Deine Dunkle Materie</h3>
-      <div class="kv"><span>Dunkle Materie</span><b>${fmt(S.cores)}</b></div>
-      <div class="kv"><span>Bonus (2 % je Einheit)</span><b>+${fmt(S.cores * 2)} % Produktion</b></div>
-      <p class="note" style="margin-top:8px">Ein Urknall setzt Masse, Orbit und Upgrades zurück. Erfolge, Dunkle Materie, Kapseln und Statistik bleiben erhalten.</p></div>
-    <div class="card"><h3>Meilensteine</h3>`;
+      <div class="kv"><span>Insgesamt erzeugt</span><b>${fmt(S.cores)}</b></div>
+      <div class="kv"><span>Bonus (${CORE_BONUS * 100} % je Einheit)</span><b>+${fmt(S.cores * CORE_BONUS * 100)} % Produktion</b></div>
+      <div class="kv"><span>Fürs Labor verfügbar</span><b>💠 ${fmt(S.dm)}</b></div>
+      <p class="note" style="margin-top:8px">Ein Urknall setzt Masse, Orbit und Upgrades zurück. Dunkle Materie, Labor, Erfolge, Kapseln und Statistik bleiben erhalten.</p></div>`;
+  if (S.cores > 0 || S.novas > 0) {
+    h += `<h3 class="sec">⚛️ Labor <small>dauerhafte Forschung</small></h3>`;
+    for (const x of LAB) {
+      const l = S.lab[x.id] || 0, full = l >= x.max, c = labCost(x, l);
+      h += `<div class="row ${full ? 'done' : 'act'}" data-act="lab" data-id="${x.id}" data-c="${full ? '' : c}" style="--h:${x.hue}"><div class="ico"><span>${x.ico}</span></div>
+        <div class="info"><div class="nm">${x.name}</div><div class="ds wrap">${x.desc(l)}${full ? '' : ` · <i>${x.step}</i>`}</div>
+        ${full ? '' : `<div class="cost">💠 ${fmt(c)}</div>`}</div><div class="cnt">${full ? 'Max' : l || ''}</div></div>`;
+    }
+  }
+  h += `<div class="card"><h3>Meilensteine</h3>`;
   MILESTONES.forEach((m, i) => {
     const got = S.cores >= m.cores;
     h += `<div class="ms ${got ? 'got' : ''} ${i ? '' : 'first'}"><div class="mi">${got ? '✓' : '💠'} ${fmt(m.cores)}</div>
@@ -405,32 +450,37 @@ BUILD.nova = () => {
 };
 UPDATE.nova = () => {
   const g = coreGain(), tot = coreTotal(S.totalEarned);
-  const lo = tot * tot * 1e8, hi = (tot + 1) * (tot + 1) * 1e8;
+  const lo = massFor(tot), hi = massFor(tot + 1);
   const f = k => el.list.querySelector(`[data-f="${k}"]`);
   put(f('gain'), `+${fmt(g)} 💠`);
   put(f('next'), `Nächste Einheit bei insgesamt ${fmt(hi)} verschlungener Masse`);
+  for (const r of el.list.querySelectorAll('.row[data-act="lab"]')) {
+    if (!r.dataset.c) continue;
+    const ok = S.dm >= +r.dataset.c;
+    r.classList.toggle('ok', ok); r.classList.toggle('no', !ok);
+  }
   const w = Math.max(0, Math.min(100, (S.totalEarned - lo) / (hi - lo) * 100)).toFixed(1) + '%';
   const bar = f('bar'); if (bar && bar.style.width !== w) bar.style.width = w;
   const btn = f('btn'); if (btn) btn.disabled = g < 1;
 };
 
 // Mehr
-KEY.more = () => JSON.stringify(S.set);
+KEY.more = () => JSON.stringify(S.set) + D.autoBuy;
 BUILD.more = () => {
   const tg = (k, label) => `<button class="tg ${S.set[k] ? 'on' : ''}" data-act="set" data-k="${k}"><span>${label}</span><span class="sw"></span></button>`;
   const kv = (k, label) => `<div class="kv"><span>${label}</span><b data-f="${k}"></b></div>`;
-  return (STANDALONE ? '' : `<div class="card"><h3>📲 Als App installieren</h3><p class="note">Öffne diese Seite in <b>Safari</b>, tippe auf <b>Teilen</b> und dann auf <b>„Zum Home-Bildschirm“</b>. Danach startet Sternenstaub wie eine App – auch ganz ohne Internet.</p></div>`)
-    + `<div class="card"><h3>Einstellungen</h3>${tg('sound', '🔊 Töne')}${tg('haptic', '📳 Vibration')}${tg('shake', '💫 Bildschirm wackelt bei Treffern')}${tg('sci', '🔢 Wissenschaftliche Zahlen')}</div>
+  return (STANDALONE ? '' : `<div class="card"><h3>📲 Als App installieren</h3><p class="note">Öffne diese Seite in <b>Safari</b>, tippe auf <b>Teilen</b> und dann auf <b>„Zum Home-Bildschirm“</b>. Danach startet ${NAME} wie eine App – auch ganz ohne Internet.</p></div>`)
+    + `<div class="card"><h3>Einstellungen</h3>${tg('sound', '🔊 Töne')}${tg('haptic', '📳 Vibration')}${tg('shake', '💫 Bildschirm wackelt bei Treffern')}${tg('gl', '✨ Aufwendige Grafik')}${D.autoBuy ? tg('auto', '🤖 Automatischer Einkauf') : ''}${tg('sci', '🔢 Wissenschaftliche Zahlen')}</div>
     <div class="card"><h3>Statistik</h3>
       ${kv('total', 'Insgesamt verschlungen')}${kv('run', 'In diesem Universum')}${kv('rate', 'Produktion')}${kv('mult', 'Gesamt-Multiplikator')}
       ${kv('taps', 'Tipps')}${kv('crits', 'Kritische Treffer')}${kv('prey', 'Beute gefangen')}${kv('stars', 'Goldene Kometen')}
       ${kv('frenzies', 'Fressräusche')}${kv('bosses', 'Großbeute verschlungen')}${kv('rivals', 'Rivalen verschlungen')}${kv('caps', 'Kapseln geöffnet')}
-      ${kv('daily', 'Tagesbeute in Folge')}${kv('novas', 'Urknalle')}${kv('off', 'Offline-Ertrag')}${kv('time', 'Aktive Spielzeit')}</div>
+      ${kv('daily', 'Tagesbeute in Folge')}${kv('quests', 'Tagesziele erfüllt')}${kv('novas', 'Urknalle')}${kv('off', 'Offline-Ertrag')}${kv('time', 'Aktive Spielzeit')}</div>
     <div class="card"><h3>Spielstand</h3><p class="note">Dein Fortschritt wird automatisch auf diesem Gerät gespeichert. Exportiere ihn ab und zu als Sicherung.</p>
       <button class="btn ghost" data-act="export">📤 Exportieren</button>
       <button class="btn ghost" data-act="import">📥 Importieren</button>
       <button class="btn danger" data-act="reset">Alles zurücksetzen</button></div>
-    <p class="note" style="text-align:center;margin:14px 0 4px">Sternenstaub ${VERSION} · offline spielbar<br>
+    <p class="note" style="text-align:center;margin:14px 0 4px">${NAME} ${VERSION} · offline spielbar<br>
       <span style="font-size:11px;opacity:.55">Anzeige ${VIEW.h} · i${VIEW.inner} c${VIEW.client} v${VIEW.vh} s${VIEW.scr}${STANDALONE ? ' · App' : ''}</span></p>`;
 };
 UPDATE.more = () => {
@@ -438,7 +488,7 @@ UPDATE.more = () => {
   f('total', fmt(S.totalEarned)); f('run', fmt(S.runEarned)); f('rate', fmtR(rate()) + '/s');
   f('mult', '×' + fmtR(D.global)); f('taps', fmt(S.taps)); f('crits', fmt(S.crits)); f('prey', fmt(S.prey));
   f('stars', fmt(S.starsCaught)); f('frenzies', fmt(S.frenzies)); f('bosses', fmt(S.bosses)); f('rivals', fmt(S.rivals));
-  f('caps', fmt(S.capsOpened)); f('daily', `${S.daily.streak} ${S.daily.streak === 1 ? 'Tag' : 'Tage'}`); f('novas', fmt(S.novas));
+  f('caps', fmt(S.capsOpened)); f('daily', `${S.daily.streak} ${S.daily.streak === 1 ? 'Tag' : 'Tage'}`); f('novas', fmt(S.novas)); f('quests', fmt(S.questsDone));
   f('off', `${Math.round(D.offEff * 100)} % · max. ${D.offCap} Std.`); f('time', fmtTime(S.played));
 };
 
@@ -450,6 +500,12 @@ function renderList() {
 
 const TAB_ORDER = ['gens', 'ups', 'ach', 'nova', 'more'];
 const AMT_ORDER = ['1', '10', '100', 'r10', 'max'];
+// Menü ein-/ausblenden: Tipp auf den offenen Reiter oder den Griff am Panel
+function setPanel(open) {
+  document.body.classList.toggle('panel-off', !open);
+  S.set.panel = open;
+  if (!open && !S.tips.panel) { S.tips.panel = 1; toast('👇 <b>Menü ausgeblendet</b><small>Tippe unten einen Reiter an, um es zurückzuholen</small>'); }
+}
 function setTab(t, animate) {
   tab = t;
   for (const b of el.tabs.querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === t);
@@ -472,6 +528,7 @@ function dots() {
   el.dotUp.classList.toggle('show', tab !== 'ups' && visibleUps().some(u => canPay(u.cost)));
   const g = coreGain();
   el.dotNova.classList.toggle('show', tab !== 'nova' && g >= 1 && g >= Math.max(3, S.cores * 0.5));
+  el.dotAch.classList.toggle('show', tab !== 'ach' && ACT.questClaimable());
 }
 
 /* ======================= Eingaben ======================= */
@@ -484,8 +541,13 @@ el.stage.addEventListener('pointerdown', e => {
 
 el.tabs.addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]');
-  if (b && b.dataset.tab !== tab) { SND.unlock(); SND.tab(); HAP.fire(true); setTab(b.dataset.tab, true); }
+  if (!b) return;
+  SND.unlock(); SND.tab(); HAP.fire(true);
+  const off = document.body.classList.contains('panel-off');
+  if (b.dataset.tab === tab) setPanel(off);           // offener Reiter: Menü aus/ein
+  else { if (off) setPanel(true); setTab(b.dataset.tab, true); }
 });
+$('#grab').addEventListener('click', () => { SND.tab(); HAP.fire(true); setPanel(false); });
 el.seg.addEventListener('click', e => {
   const b = e.target.closest('button[data-amt]');
   if (b) { HAP.fire(true); const a = b.dataset.amt; setAmt(/^\d+$/.test(a) ? +a : a); }
@@ -505,6 +567,8 @@ el.list.addEventListener('click', e => {
   if (a === 'gen') buyGen(+b.dataset.i, b);
   else if (a === 'up') buyUp(b.dataset.id, b);
   else if (a === 'nova') confirmNova();
+  else if (a === 'lab') buyLab(b.dataset.id, b);
+  else if (a === 'quest') ACT.claimQuest(+b.dataset.i);
   else if (a === 'set') toggleSet(b.dataset.k);
   else if (a === 'export') exportSave();
   else if (a === 'import') importSave();
@@ -589,7 +653,7 @@ function frame(ms) {
   hud();
   ACT.ui(now);
   if (acc.ui >= 0.2) { acc.ui = 0; renderList(); renderBuffs(); dots(); syncOrbit(); }
-  if (acc.ach >= 0.5) { acc.ach = 0; checkAch(); }
+  if (acc.ach >= 0.5) { acc.ach = 0; checkAch(); autoBuy(); }
   if (acc.save >= 5) { acc.save = 0; save(); }
   FX.setStage(stageFloat(S.runEarned));
   FX.draw(ms / 1000);
@@ -610,9 +674,10 @@ ACT.init();
 if (S.taps >= 5) el.hint.classList.add('gone');
 setAmt(S.buyAmt);
 setTab('gens');
+if (S.set.panel === false) document.body.classList.add('panel-off');
 renderBuffs();
 if (!hadSave) {
-  modal(`<div class="em">🕳️</div><h3>Sternenstaub</h3>
+  modal(`<div class="em">🕳️</div><h3>${NAME}</h3>
     <p>Du bist ein winziges Schwarzes Loch – und du hast Hunger. Tippe auf dich, um Materie anzusaugen, und schnapp dir alles, was vorbeifliegt.</p>
     <p style="margin-top:10px">Zieh Himmelskörper in deinen <b>Orbit</b>: Sie füttern dich weiter, sogar wenn die App geschlossen ist.</p>
     <button class="btn" data-m="close">Los geht's</button>`);

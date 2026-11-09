@@ -1,4 +1,4 @@
-/* Sternenstaub – Design
+/* Singularität – Design
    Zwei Ebenen nach Apples Liquid-Glass-Modell:
    • Inhalt (Himmel, Schwarzes Loch, Listen, Karten): ruhige Flächen, Farbe kommt aus den Himmelskörpern.
    • Bedienebene (Tab-Leiste, Dialoge, Meldungen): echtes Glas mit Unschärfe und Lichtkante. */
@@ -104,7 +104,16 @@ svg { display: block; }
   background: linear-gradient(180deg, rgba(28, 20, 66, .74), rgba(13, 9, 36, .94) 70%);
   -webkit-backdrop-filter: blur(22px) saturate(140%); backdrop-filter: blur(22px) saturate(140%);
   box-shadow: 0 -18px 50px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .1);
+  transition: height .5s var(--ease), min-height .5s var(--ease), opacity .3s;
 }
+/* Menü ausgeblendet: nur die Tab-Leiste bleibt, das Loch bekommt den ganzen Bildschirm */
+body.panel-off #panel { height: calc(var(--tab-h) + var(--tab-gap) + 4px) !important; min-height: 0 !important; opacity: 0; pointer-events: none; }
+body.panel-off .tab-pill { opacity: 0; }
+body.panel-off #tabs button.on { color: rgba(245, 241, 255, .62); }
+body.panel-off #tabs button.on .ti { color: inherit; transform: none; filter: none; }
+.tab-pill { transition: transform .5s var(--spring), opacity .3s; }
+#grab { position: absolute; z-index: 3; top: 0; left: 50%; width: 96px; height: 20px; margin-left: -48px; }
+#grab::before { content: ""; position: absolute; top: 7px; left: 30px; width: 36px; height: 4px; border-radius: 9px; background: rgba(255, 255, 255, .26); }
 #panel::before { content: ""; position: absolute; top: 0; left: 28px; right: 28px; height: 1px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .4), transparent); }
 .phead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 18px 6px; min-height: 58px; }
 .phead h2 { min-width: 0; font-size: 22px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -406,6 +415,22 @@ body.rausch #glow { opacity: 1; animation: rpulse .55s ease-in-out infinite alte
 .day b { font-size: 9.5px; font-weight: 800; white-space: nowrap; }
 .day.done { opacity: .42; }
 .day.today { background: linear-gradient(160deg, rgba(255, 210, 122, .25), rgba(255, 143, 216, .12)); box-shadow: inset 0 0 0 1.5px rgba(255, 210, 122, .75), 0 0 18px rgba(255, 190, 120, .3); }
+/* Tagesziele & Labor */
+.card h3 .hs, h3.sec small { font-size: 11.5px; font-weight: 650; color: var(--muted); margin-left: 6px; }
+h3.sec { margin: 18px 4px 2px; font-size: 16px; font-weight: 800; }
+.quest { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid rgba(255, 255, 255, .06); }
+.quest .qi { flex: 1; min-width: 0; }
+.quest b { display: block; font-size: 14.5px; font-weight: 750; }
+.quest .bar { height: 6px; margin-top: 6px; }
+.quest .bar i { transform-origin: left; width: 100%; transform: scaleX(0); transition: transform .3s linear; }
+.quest small { display: block; margin-top: 3px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.quest.got { opacity: .5; }
+.qb { flex: none; width: 48px; height: 48px; border-radius: 16px; display: grid; place-items: center; background: rgba(255, 255, 255, .07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); transition: scale .2s var(--spring); }
+.qb img { width: 42px; height: 42px; pointer-events: none; }
+.qb:disabled { opacity: .35; filter: grayscale(.8); }
+.quest.ready .qb { background: linear-gradient(120deg, rgba(255, 210, 122, .35), rgba(255, 143, 216, .25)); box-shadow: inset 0 0 0 1.5px rgba(255, 210, 122, .8), 0 0 18px rgba(255, 190, 120, .4); animation: breathe 1.2s ease-in-out infinite; }
+.qb:active { scale: .9; }
+.ds i { font-style: normal; opacity: .7; }
 .buff.crit { color: #ffa489; background: rgba(255, 110, 80, .13); box-shadow: inset 0 0 0 1px rgba(255, 120, 90, .45), 0 0 18px rgba(255, 110, 80, .18); }
 
 @media (max-height: 760px) {
