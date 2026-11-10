@@ -1388,18 +1388,35 @@ const SND = (() => {
   };
 })();
 
-/* ---------- Vibration (Android: vibrate, iOS 18+: Switch-Trick) ---------- */
+/* ---------- Vibration ----------
+   Android: navigator.vibrate. iPhone (ab iOS 18): Ein Klick auf einen frisch erzeugten Schalter
+   (<input type="checkbox" switch>) löst das System-Tippgefühl aus – aber nur während einer
+   echten Berührung. Beim Aufsetzen des Fingers (pointerdown) gilt das in Safari noch nicht,
+   deshalb wird der Impuls dann vorgemerkt und beim Loslassen (touchend) ausgelöst. */
 const HAP = (() => {
-  let on = true, last = 0;
-  const lab = document.getElementById('hapLabel');
+  let on = true, last = 0, pending = 0;
+  function tick() {
+    try {
+      const lab = document.createElement('label'), inp = document.createElement('input');
+      lab.setAttribute('aria-hidden', 'true'); lab.style.display = 'none';
+      inp.type = 'checkbox'; inp.setAttribute('switch', '');
+      lab.appendChild(inp); document.head.appendChild(lab);
+      lab.click();
+      document.head.removeChild(lab);
+    } catch (e) {}
+  }
   function fire(force) {
     if (!on) return;
     const t = performance.now();
     if (!force && t - last < 45) return;
     last = t;
     if (navigator.vibrate) { try { navigator.vibrate(10); } catch (e) {} return; }
-    if (lab) lab.click();
+    const ua = navigator.userActivation;
+    if (ua && ua.isActive) tick(); else pending = t;
   }
+  // vorgemerkten Impuls beim Loslassen nachholen
+  const flush = () => { if (pending && performance.now() - pending < 400) { pending = 0; if (on && !navigator.vibrate) tick(); } };
+  ['touchend', 'pointerup', 'click'].forEach(ev => document.addEventListener(ev, flush, { capture: true, passive: true }));
   return {
     setOn(v) { on = v; },
     fire,

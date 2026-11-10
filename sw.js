@@ -2,7 +2,7 @@
    Netz zuerst: Ist das Gerät online, kommt immer die neueste Version (kurzer Abgleich per ETag).
    Nur offline oder bei sehr langsamem Netz wird die gespeicherte Kopie genutzt.
    Version erhöhen mit:  node version.mjs <neue-version> */
-const VERSION = '3.0';
+const VERSION = '3.1';
 const CACHE = 'sternenstaub-' + VERSION;
 const TIMEOUT = 2500;
 const ASSETS = [
