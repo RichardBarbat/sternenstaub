@@ -1428,6 +1428,16 @@ const HAP = (() => {
   }
   return {
     setOn(v) { on = v; if (pad) pad.style.display = v ? '' : 'none'; },
+    // Abklingende Vibration, solange ein großes Objekt eingesaugt wird: Impulse werden kürzer,
+    // Pausen länger. Geht nur, wo der Browser echte Vibration erlaubt (Android) – das iPhone
+    // lässt Web-Apps nur den einzelnen Tick beim Tippen.
+    fade(ms) {
+      if (!on || !navigator.vibrate) return;
+      const pat = []; let t = 0;
+      for (let i = 0; t < ms; i++) { const k = t / ms, pulse = Math.max(6, Math.round(46 * (1 - k) * (1 - k))), gap = Math.round(14 + 70 * k); pat.push(pulse, gap); t += pulse + gap; }
+      try { navigator.vibrate(pat); } catch (e) {}
+      last = performance.now() + ms; // währenddessen keine Einzelticks dazwischen
+    },
     fire,
     burst(n, gap = 70) { for (let i = 0; i < n; i++) setTimeout(() => fire(true), i * gap); },
   };

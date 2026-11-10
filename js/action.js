@@ -178,13 +178,14 @@ const ACT = (() => {
     if (p.swarm && ev && ev.kind === 'swarm') ev.caught++;
     FX.devour({ spr: p.spr, v: p.v, x: p.x, y: p.y, size: p.size, hue: p.hue });
     FX.float(p.x, p.y, '+' + fmt(v), 'big'); FX.toCounter(p.x, p.y, 4);
-    SND.devour(); HAP.fire(true);
+    SND.devour();
+    if (p.kind === 'comet' || p.kind === 'sat' || p.kind === 'moon') HAP.fade(750); else HAP.fire(true);
   }
   function catchGold(p) {
     S.starsCaught++;
     FX.devour({ spr: 'gold', x: p.x, y: p.y, size: p.size, hue: 45 });
     FX.burst(p.x, p.y, 60, 45, 1.6); FX.wave(p.x, p.y, 6, 70, 0.6, { h: 45, width: 4, alpha: 0.8 });
-    SND.star(); HAP.burst(2);
+    SND.star(); HAP.fade(750);
     const e = pick(STAR_EFFECTS);
     if (e.id === 'fund') {
       const g = Math.max(baseRate() * buffMult('prod') * 600, tapBase() * 40, 25);
@@ -268,7 +269,7 @@ const ACT = (() => {
     FX.devour({ spr: b.spr, x: b.x, y: b.y, size: b.size, hue: b.hue, big: true,
       cb: () => { FX.float(FX.hole.x, FX.hole.y - FX.hole.R * 2.2, '+' + fmt(g), 'big'); FX.toCounter(FX.hole.x, FX.hole.y, 8); } });
     const r = rollRarity();
-    give(r, 1); SND.devour(true); SND.win(); HAP.burst(4, 80);
+    give(r, 1); SND.devour(true); SND.win(); HAP.fade(1300);
     toast(`${b.ico} <b>${b.name} verschlungen!</b><small>+${fmt(g)} Masse · +1 ${RARITY[r].adj} Kapsel</small>`);
     schedEvent(Date.now()); checkAch(); save();
   }
@@ -321,7 +322,7 @@ const ACT = (() => {
     FX.devour({ spr: 'mini', x: rv.x, y: rv.y, size: rv.r * 2, hue: 290, big: true,
       cb: () => { FX.float(FX.hole.x, FX.hole.y - FX.hole.R * 2.2, '+' + fmt(g), 'big'); FX.toCounter(FX.hole.x, FX.hole.y, 8); FX.flash(0.3, 'hsl(290,100%,82%)'); } });
     const r = rollRarity();
-    give(r, 1); SND.devour(true); SND.win(); HAP.burst(4, 80);
+    give(r, 1); SND.devour(true); SND.win(); HAP.fade(1300);
     toast(`⚫ <b>Rivale verschlungen!</b><small>+${fmt(g)} Masse · +1 ${RARITY[r].adj} Kapsel</small>`);
     schedEvent(Date.now()); checkAch(); save();
   }
