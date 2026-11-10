@@ -3,7 +3,7 @@
 
 const SAVE_KEY = 'sternenstaub-v3'; // Adresse & Schlüssel behalten den alten Projektnamen
 const NAME = 'Singularität';
-const VERSION = '3.3';
+const VERSION = '3.4';
 const $ = s => document.querySelector(s);
 const el = {
   dust: $('#dust'), rate: $('#rate'), tapv: $('#tapv'), buffs: $('#buffs'), stage: $('#stage'), hint: $('#hint'),

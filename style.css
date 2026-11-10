@@ -507,6 +507,36 @@ h3.sec { margin: 18px 4px 2px; font-size: 16px; font-weight: 800; }
 /* kleine iPhones: Panel etwas flacher, damit das Loch und die Beute Platz haben */
 @media (max-height: 700px) { #panel { height: calc(31% + var(--tab-h) + var(--tab-gap)); min-height: 260px; } }
 
+/* ---------- Querformat: Menü links, Schwarzes Loch rechts ---------- */
+@media (orientation: landscape) {
+  :root { --pw: clamp(300px, 46vw, 480px); --sal: env(safe-area-inset-left, 0px); --sar: env(safe-area-inset-right, 0px); }
+  #app {
+    display: grid; grid-template-columns: calc(var(--pw) + var(--sal)) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
+    max-width: none; padding-top: 0; transition: grid-template-columns .45s var(--ease);
+  }
+  #panel, body.panel-off #panel {
+    grid-column: 1; grid-row: 1 / 3; height: 100% !important; min-height: 0 !important;
+    border-radius: 0 28px 28px 0; padding-left: var(--sal); box-shadow: 18px 0 50px rgba(0, 0, 0, .42), inset -1px 0 0 rgba(255, 255, 255, .1);
+  }
+  #panel::before { display: none; }
+  #hud { grid-column: 2; grid-row: 1; padding: max(8px, var(--sat)) calc(16px + var(--sar)) 0 16px; }
+  #stage { grid-column: 2; grid-row: 2; min-height: 0; }
+  .amount { font-size: clamp(28px, 7vh, 40px); }
+  .chips { margin-top: 4px; }
+  #hunger { margin-top: 2px; }
+  #buffs { margin-top: 0; height: 26px; }
+  #tabs { left: calc(10px + var(--sal)); right: auto; width: calc(var(--pw) - 20px); }
+  #grab { display: none; }
+  #abil { right: calc(10px + var(--sar)); }
+  .phead { padding-top: max(12px, var(--sat)); }
+  /* Menü ausgeblendet: das Loch bekommt die ganze Breite, die Tab-Leiste bleibt unten links */
+  body.panel-off #app { grid-template-columns: 0px minmax(0, 1fr); }
+  body.panel-off #panel { padding-left: 0; }
+  /* Banner und Stufenanzeige rücken neben die Tab-Leiste */
+  body.panel-off #event, body.panel-off #growth { left: auto; right: calc(76px + var(--sar)); transform: none; width: min(300px, calc(100% - var(--pw) - 100px)); }
+  .sheet { max-height: 92%; padding-top: 20px; }
+}
+
 /* ---------- Bedienungshilfen ---------- */
 @media (prefers-reduced-transparency: reduce) {
   .glass, .toast, #panel, .btn.ghost, .ab, #capBtn { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }

@@ -94,7 +94,7 @@ const ACT = (() => {
   const Q = { x: 0, y: 0 };
   function bez(p, t) { const u = 1 - t; Q.x = u * u * p.x0 + 2 * u * t * p.cx + t * t * p.x1; Q.y = u * u * p.y0 + 2 * u * t * p.cy + t * t * p.y1; return Q; }
   // Flugbereich: unter den Meldungen oben, über der Wachstumsanzeige (bzw. dem Ereignis-Banner) unten
-  function band(bottomPad = 46) { const st = el.stage.getBoundingClientRect(); return { top: st.top + 56, bottom: st.bottom - bottomPad, w: innerWidth }; }
+  function band(bottomPad = 46) { const st = el.stage.getBoundingClientRect(); return { top: st.top + 56, bottom: st.bottom - bottomPad, l: st.left, r: st.right }; }
   function pathClear(p, clearR, b) {
     const h = FX.hole;
     for (let i = 0; i <= 24; i++) {
@@ -105,8 +105,8 @@ const ACT = (() => {
   }
   // Flugbahn quer durchs Bild, vom Loch leicht angezogen, aber nie hinein
   function makePath(fromLeft) {
-    const b = band(), h = FX.hole, W = b.w, clearR = h.R * 2.3 + 14;
-    const x0 = fromLeft ? -30 : W + 30, x1 = fromLeft ? W + 30 : -30;
+    const b = band(), h = FX.hole, clearR = h.R * 2.3 + 14;
+    const x0 = fromLeft ? b.l - 30 : b.r + 30, x1 = fromLeft ? b.r + 30 : b.l - 30; // nur über der Bühne (Querformat: rechte Hälfte)
     for (let tries = 0; tries < 10; tries++) {
       const above = Math.random() < 0.5;
       let lo = above ? b.top : h.y + clearR, hi = above ? h.y - clearR : b.bottom;
@@ -116,7 +116,7 @@ const ACT = (() => {
       if (pathClear(p, clearR, b)) return p;
     }
     const y = b.top + 4;
-    return { x0, y0: y, cx: W / 2, cy: y, x1, y1: y };
+    return { x0, y0: y, cx: (b.l + b.r) / 2, cy: y, x1, y1: y };
   }
   function spawnPrey(kind, o = {}) {
     const d = kind === 'gold' ? GOLD : kind === 'cap' ? CAP : PREY[kind];
@@ -234,12 +234,12 @@ const ACT = (() => {
 
   // Großbeute: muss rechtzeitig zerrissen werden
   function startBoss() {
-    const st = stage(), B = BOSSES.filter(b => st >= b.stage).pop(), h = FX.hole, b = band(72), W = b.w;
+    const st = stage(), B = BOSSES.filter(b => st >= b.stage).pop(), h = FX.hole, b = band(72);
     const hp = Math.max(8, Math.round((18 + 4 * Math.min(st, 8)) * D.bossHp));
     const size = clamp(h.R * 0.9 + 12, 34, 54), fromLeft = Math.random() < 0.5, above = Math.random() < 0.5;
     let y = above ? h.y - h.R * 2 - size * 0.5 : h.y + h.R * 2 + size * 0.5;
     y = clamp(y, b.top + size * 0.4, b.bottom - size * 0.5);
-    const path = { x0: fromLeft ? -size : W + size, y0: y + rand(-8, 8), cx: W / 2, cy: y + (above ? -12 : 12), x1: fromLeft ? W + size : -size, y1: y + rand(-8, 8) };
+    const path = { x0: fromLeft ? b.l - size : b.r + size, y0: y + rand(-8, 8), cx: (b.l + b.r) / 2, cy: y + (above ? -12 : 12), x1: fromLeft ? b.r + size : b.l - size, y1: y + rand(-8, 8) };
     boss = Object.assign({}, B, { hp, max: hp, size, path, t: 0, dur: 14, x: path.x0, y: path.y0, rot: 0, shake: 0, alpha: 1,
       tail: B.spr === 'bcomet' ? 'rgba(150,215,255,1)' : null, hist: B.spr === 'bcomet' ? [] : null });
     ev = { kind: 'boss' };
@@ -282,7 +282,7 @@ const ACT = (() => {
   function startRival() {
     const h = FX.hole, b = band(72), side = Math.random() < 0.5 ? -1 : 1, r = Math.max(11, h.R * 0.42);
     // nicht unter die Knöpfe am Rand (Kapseln links, Fähigkeiten rechts)
-    const x = clamp(h.x + side * Math.min(innerWidth * 0.32, h.orbitR * 0.78), 66 + r * 2.7, innerWidth - 72 - r * 2.7);
+    const x = clamp(h.x + side * Math.min((b.r - b.l) * 0.32, h.orbitR * 0.78), b.l + 66 + r * 2.7, b.r - 72 - r * 2.7);
     const y = clamp(h.y + rand(-h.R * 1.2, h.R * 0.6), b.top + r * 2, b.bottom - r * 2);
     const hp = Math.max(6, Math.round(12 * D.bossHp));
     rival = { x, y, r, hp, max: hp, t: 0, dur: 15, stolen: 0, acc: 0, vis: 0, shake: 0, stealing: false, leaving: false };
@@ -551,7 +551,7 @@ const ACT = (() => {
     }
     if (active.jet && now >= active.jet) { active.jet = 0; FX.setMode('jet', 0); }
     // Labor „Fangarme“: fängt Beute von selbst
-    if (D.autoCatch) { acc.arm += dt; if (acc.arm >= D.autoCatch) { const p = prey.find(q => q.x > 20 && q.x < innerWidth - 20); if (p) { acc.arm = 0; catchPrey(p, true); } } }
+    if (D.autoCatch) { acc.arm += dt; if (acc.arm >= D.autoCatch) { const b = band(), p = prey.find(q => q.x > b.l + 20 && q.x < b.r - 20); if (p) { acc.arm = 0; catchPrey(p, true); } } }
 
     const free = el.modal.hidden && !document.hidden;
     if (free && now >= nextPrey) {
