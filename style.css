@@ -509,7 +509,7 @@ h3.sec { margin: 18px 4px 2px; font-size: 16px; font-weight: 800; }
 
 /* ---------- Querformat: Menü links, Schwarzes Loch rechts ---------- */
 @media (orientation: landscape) {
-  :root { --pw: clamp(300px, 46vw, 480px); --sal: env(safe-area-inset-left, 0px); --sar: env(safe-area-inset-right, 0px); }
+  :root { --pw: clamp(290px, 33.3vw, 440px); --sal: env(safe-area-inset-left, 0px); --sar: env(safe-area-inset-right, 0px); }
   #app {
     display: grid; grid-template-columns: calc(var(--pw) + var(--sal)) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
     max-width: none; padding-top: 0; transition: grid-template-columns .45s var(--ease);
@@ -528,7 +528,17 @@ h3.sec { margin: 18px 4px 2px; font-size: 16px; font-weight: 800; }
   #tabs { left: calc(10px + var(--sal)); right: auto; width: calc(var(--pw) - 20px); }
   #grab { display: none; }
   #abil { right: calc(10px + var(--sar)); }
-  .phead { padding-top: max(12px, var(--sat)); }
+  /* schmales Menü: Titel kleiner, Kaufmengen als große, gut treffbare Knöpfe */
+  .phead { padding: max(14px, var(--sat)) 12px 8px 14px; gap: 8px; min-height: 0; }
+  .phead h2 { font-size: 19px; }
+  .seg button { width: 40px; padding: 12px 0; font-size: 12.5px; }
+  .seg-thumb { width: 40px; }
+  #list { padding-left: 10px; padding-right: 10px; }
+  .row { gap: 10px; padding-left: 9px; padding-right: 10px; }
+  .ico { width: 44px; height: 44px; font-size: 24px; }
+  .cnt { font-size: 22px; min-width: 28px; }
+  #tabs button { font-size: 9.5px; }
+  #tabs .ti { width: 22px; height: 22px; }
   /* Menü ausgeblendet: das Loch bekommt die ganze Breite, die Tab-Leiste bleibt unten links */
   body.panel-off #app { grid-template-columns: 0px minmax(0, 1fr); }
   body.panel-off #panel { padding-left: 0; }

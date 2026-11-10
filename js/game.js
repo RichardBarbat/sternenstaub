@@ -3,7 +3,7 @@
 
 const SAVE_KEY = 'sternenstaub-v3'; // Adresse & Schlüssel behalten den alten Projektnamen
 const NAME = 'Singularität';
-const VERSION = '3.4';
+const VERSION = '3.5';
 const $ = s => document.querySelector(s);
 const el = {
   dust: $('#dust'), rate: $('#rate'), tapv: $('#tapv'), buffs: $('#buffs'), stage: $('#stage'), hint: $('#hint'),
@@ -481,7 +481,7 @@ BUILD.more = () => {
       <button class="btn ghost" data-act="import">📥 Importieren</button>
       <button class="btn danger" data-act="reset">Alles zurücksetzen</button></div>
     <p class="note" style="text-align:center;margin:14px 0 4px">${NAME} ${VERSION} · offline spielbar<br>
-      <span style="font-size:11px;opacity:.55">Anzeige ${VIEW.h} · i${VIEW.inner} c${VIEW.client} v${VIEW.vh} s${VIEW.scr}${STANDALONE ? ' · App' : ''}</span></p>`;
+      <span style="font-size:11px;opacity:.55">Anzeige ${VIEW.h} · i${VIEW.inner} c${VIEW.client} v${VIEW.vh} s${VIEW.scr} · b${window.innerWidth}${window.visualViewport ? ' vv' + Math.round(visualViewport.height) + '/' + Math.round(visualViewport.offsetTop) : ''}${STANDALONE ? ' · App' : ''}</span></p>`;
 };
 UPDATE.more = () => {
   const f = (k, v) => put(el.list.querySelector(`[data-f="${k}"]`), v);
@@ -559,6 +559,7 @@ document.addEventListener('touchmove', e => {
   if (!e.target.closest('#list, .sheet')) e.preventDefault();
 }, { passive: false });
 window.addEventListener('scroll', () => { if (window.scrollY || window.scrollX) window.scrollTo(0, 0); });
+if (window.visualViewport) visualViewport.addEventListener('scroll', () => { if (visualViewport.offsetTop || visualViewport.pageTop) window.scrollTo(0, 0); });
 el.list.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
@@ -594,7 +595,9 @@ function measureHeight() {
   const portrait = window.innerWidth <= Math.max(inner, client);
   const scr = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
   let h = Math.max(inner, client);
-  if (STANDALONE) for (const c of [scr, vh]) if (c > h && c - h <= 80) h = c;
+  // Nur im Hochformat nötig (Statusleiste). Im Querformat würde eine erzwungene Höhe die Seite
+  // höher als den sichtbaren Bereich machen – dann treffen Tipps versetzt.
+  if (STANDALONE && portrait) for (const c of [scr, vh]) if (c > h && c - h <= 80) h = c;
   Object.assign(VIEW, { inner, client, vh, scr, h });
   return h;
 }
