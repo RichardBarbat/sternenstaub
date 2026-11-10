@@ -3,7 +3,7 @@
 
 const SAVE_KEY = 'sternenstaub-v3'; // Adresse & Schlüssel behalten den alten Projektnamen
 const NAME = 'Singularität';
-const VERSION = '3.1';
+const VERSION = '3.2';
 const $ = s => document.querySelector(s);
 const el = {
   dust: $('#dust'), rate: $('#rate'), tapv: $('#tapv'), buffs: $('#buffs'), stage: $('#stage'), hint: $('#hint'),
@@ -534,7 +534,7 @@ function dots() {
 /* ======================= Eingaben ======================= */
 el.stage.addEventListener('pointerdown', e => {
   if (e.target.closest('button')) return; // Fähigkeiten & Kapseln haben eigene Knöpfe
-  e.preventDefault();
+  if (!e.target.closest('#hapPad')) e.preventDefault(); // der Vibrations-Schalter braucht den echten Tipp
   SND.unlock();
   ACT.stageTap(e.clientX, e.clientY);
 }, { passive: false });

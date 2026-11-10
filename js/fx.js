@@ -1417,8 +1417,17 @@ const HAP = (() => {
   // vorgemerkten Impuls beim Loslassen nachholen
   const flush = () => { if (pending && performance.now() - pending < 400) { pending = 0; if (on && !navigator.vibrate) tick(); } };
   ['touchend', 'pointerup', 'click'].forEach(ev => document.addEventListener(ev, flush, { capture: true, passive: true }));
+  // Ab iOS 26.5 zählt nur noch ein echter Fingertipp auf den Schalter. Deshalb liegt ein
+  // unsichtbarer Schalter über der ganzen Tippfläche: Jeder Tipp aufs Loch schaltet ihn selbst um.
+  let pad = null;
+  const stage = document.getElementById('stage');
+  if (stage && !navigator.vibrate) {
+    pad = document.createElement('label'); pad.id = 'hapPad'; pad.setAttribute('aria-hidden', 'true');
+    const inp = document.createElement('input'); inp.type = 'checkbox'; inp.setAttribute('switch', ''); inp.tabIndex = -1;
+    pad.appendChild(inp); stage.prepend(pad);
+  }
   return {
-    setOn(v) { on = v; },
+    setOn(v) { on = v; if (pad) pad.style.display = v ? '' : 'none'; },
     fire,
     burst(n, gap = 70) { for (let i = 0; i < n; i++) setTimeout(() => fire(true), i * gap); },
   };

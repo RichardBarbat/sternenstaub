@@ -475,6 +475,9 @@ h3.sec { margin: 18px 4px 2px; font-size: 16px; font-weight: 800; }
 }
 
 #hapLabel { display: none; }
+/* unsichtbarer Schalter über der Tippfläche: löst auf dem iPhone das Tippgefühl aus */
+#hapPad { position: absolute; inset: 0; z-index: 0; display: block; overflow: hidden; opacity: 0; -webkit-tap-highlight-color: transparent; }
+#hapPad input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; }
 
 @keyframes pop { from { transform: scale(.8); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes rise { from { transform: translateY(40px) scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
